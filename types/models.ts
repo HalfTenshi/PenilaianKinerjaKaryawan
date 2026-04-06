@@ -1,5 +1,9 @@
 export type UserRole = 'admin' | 'karyawan';
 
+export type StatusPeriode = 'aktif' | 'ditutup';
+export type StatusPenilaian = 'draft' | 'dikirim' | 'dinilai';
+export type StatusKehadiran = 'hadir' | 'sakit' | 'izin';
+
 export interface Pengguna {
   uid: string;
   email: string;
@@ -25,15 +29,32 @@ export interface Karyawan {
 
   // Firestore Timestamp
   createdAt: any;
+  updatedAt?: any;
 }
 
 export interface PeriodePenilaian {
   id: string;
   namaPeriode: string;
-  startDate: any;
-  endDate: any;
-  status: 'aktif' | 'ditutup';
+  status: StatusPeriode;
+
+  /**
+   * Field tanggal bisa bervariasi.
+   * Wajib support semua alias ini karena data lama / page lain
+   * bisa masih memakai nama field berbeda.
+   */
+  mulai?: any;
+  startDate?: any;
+  tanggalMulai?: any;
+  awal?: any;
+
+  selesai?: any;
+  endDate?: any;
+  tanggalSelesai?: any;
+  akhir?: any;
+
+  // Firestore Timestamp
   createdAt: any;
+  updatedAt?: any;
 }
 
 export interface KriteriaPenilaian {
@@ -42,26 +63,64 @@ export interface KriteriaPenilaian {
   namaKriteria: string;
   bobot: number;
   urutan: number;
+
+  // optional untuk kompatibilitas data
+  createdAt?: any;
+  updatedAt?: any;
 }
 
 export interface PenilaianKinerja {
+  /**
+   * doc id final:
+   * `${karyawanId}_${periodeId}`
+   */
   id: string;
   periodeId: string;
   karyawanId: string;
-  status: 'draft' | 'dikirim' | 'dinilai';
+
+  status: StatusPenilaian;
+
   nilaiKaryawan: Record<string, number>;
-  catatanKaryawan: string;
   nilaiAdmin: Record<string, number>;
-  catatanAdmin: string;
-  totalNilai: number;
+
+  catatanKaryawan?: string;
+  catatanAdmin?: string;
+
+  /**
+   * Nilai akhir final yang disimpan (optional).
+   * Rumus:
+   * total = Σ ( (nilai/5) * 100 * (bobot/100) )
+   * dibulatkan 2 desimal
+   */
+  totalNilai?: number;
+
   createdAt: any;
   updatedAt: any;
 }
 
 export interface Absensi {
+  /**
+   * doc id final:
+   * `${karyawanId}_${yyyy-mm-dd}`
+   */
   id: string;
   karyawanId: string;
   tanggal: any;
-  status: 'hadir' | 'sakit' | 'izin' | 'alpha';
-  keterangan?: string;
+
+  /**
+   * FINAL:
+   * alpha TIDAK disimpan.
+   * alpha dihitung otomatis:
+   * totalHariKerja - (hadir + sakit + izin)
+   */
+  statusKehadiran: StatusKehadiran;
+
+  createdAt: any;
+  updatedAt?: any;
+
+  /**
+   * fallback data lama agar pembacaan data existing tetap aman.
+   * Jangan dipakai untuk penulisan data baru.
+   */
+  status?: StatusKehadiran;
 }

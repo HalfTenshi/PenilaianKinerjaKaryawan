@@ -1,4 +1,3 @@
-// src/lib/firebase/adminPenilaianKinerja.ts
 import {
   collection,
   doc,
@@ -6,112 +5,55 @@ import {
   getDocs,
   query,
   where,
-  orderBy,
   limit,
-  writeBatch,
+  updateDoc,
   serverTimestamp,
 } from 'firebase/firestore';
 import { getFirebaseDb } from '@/lib/firebase/firebase';
 import { COLLECTIONS } from '@/lib/firebase/collections';
+import type {
+  PeriodePenilaian,
+  KriteriaPenilaian,
+  Karyawan,
+  PenilaianKinerja,
+  Absensi,
+  StatusPenilaian,
+  StatusKehadiran,
+} from '@/types/models';
+
+export type { PeriodePenilaian, KriteriaPenilaian, Karyawan, PenilaianKinerja };
 
 export type StatusPeriode = 'aktif' | 'ditutup';
-export type StatusPenilaian = 'draft' | 'dikirim' | 'dinilai';
-
-export type PeriodePenilaian = {
-  id: string;
-  namaPeriode: string;
-  status: StatusPeriode;
-  mulai: any; // Timestamp | Date | string
-  selesai: any;
-  createdAt?: any;
-  updatedAt?: any;
-};
-
-export type KriteriaPenilaian = {
-  id: string;
-  periodeId: string;
-  namaKriteria: string;
-  bobot: number;
-  urutan: number;
-  createdAt?: any;
-  updatedAt?: any;
-};
-
-export type Karyawan = {
-  id: string;
-  nama: string;
-  nip: string;
-  bagian: string;
-  jabatan: string;
-  statusAktif: boolean;
-  createdAt?: any;
-};
-
-export type PenilaianKinerja = {
-  id: string; // docId = `${karyawanId}_${periodeId}`
-  karyawanId: string;
-  periodeId: string;
-
-  nilaiKaryawan: Record<string, number>;
-  catatanKaryawan?: string;
-
-  nilaiAdmin: Record<string, number>;
-  catatanAdmin: string;
-
-  // ✅ optional cached totals (biar list/laporan sinkron & cepat)
-  totalNilaiKaryawan?: number;
-  totalNilaiAdmin?: number;
-
-  status: StatusPenilaian;
-  createdAt?: any;
-  updatedAt?: any;
-};
-
-// ✅ Absensi FINAL (sesuai dashboard karyawan)
-export type AttendanceStatus = 'hadir' | 'sakit' | 'izin';
-
-export type Attendance = {
-  id: string; // `${karyawanId}_${yyyy-mm-dd}`
-  karyawanId: string;
-  tanggal: any; // string 'YYYY-MM-DD' | Timestamp | Date
-  statusKehadiran?: AttendanceStatus;
-  status?: AttendanceStatus; // fallback data lama
-  catatan?: string;
-  createdAt?: any;
-  updatedAt?: any;
-};
+export type AttendanceStatus = StatusKehadiran;
 
 function assertDb() {
   const db = getFirebaseDb();
-  if (!db) throw new Error('Firebase belum diinisialisasi (db null).');
+  if (!db) {
+    throw new Error('Firebase belum diinisialisasi (db null).');
+  }
   return db;
 }
 
-/**
- * Ubah value tanggal Firestore ke Date.
- * Support: Timestamp (toDate), Date, string 'YYYY-MM-DD', ISO string
- */
-function toDateSafe(v: any): Date | null {
-  if (!v) return null;
-  if (typeof v?.toDate === 'function') return v.toDate();
-  if (v instanceof Date) return v;
+function toDateSafe(value: any): Date | null {
+  if (!value) return null;
 
-  if (typeof v === 'string') {
-    // 'YYYY-MM-DD'
-    const parts = v.split('-');
-    if (parts.length === 3 && !v.includes('T')) {
-      const yy = Number(parts[0]);
-      const mm = Number(parts[1]);
-      const dd = Number(parts[2]);
-      if (Number.isFinite(yy) && Number.isFinite(mm) && Number.isFinite(dd)) {
-        return new Date(yy, mm - 1, dd);
-      }
+  if (typeof value?.toDate === 'function') {
+    return value.toDate();
+  }
+
+  if (value instanceof Date) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const [y, m, d] = value.split('-').map(Number);
+      return new Date(y, m - 1, d);
     }
 
-    // ISO
-    if (v.includes('T')) {
-      const d = new Date(v);
-      if (!isNaN(d.getTime())) return d;
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed;
     }
   }
 
@@ -121,8 +63,13 @@ function toDateSafe(v: any): Date | null {
 function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
+
 function isSunday(d: Date) {
   return d.getDay() === 0;
+}
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
 }
 
 function toNumberOrZero(v: any) {
@@ -130,117 +77,244 @@ function toNumberOrZero(v: any) {
   return Number.isFinite(n) ? n : 0;
 }
 
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
+function clampNilai(v: any) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  if (n < 0) return 0;
+  if (n > 5) return 5;
+  return n;
 }
 
-/** Ambil semua periode */
+function sanitizeNilaiMap(nilai?: Record<string, number>): Record<string, number> {
+  const result: Record<string, number> = {};
+  if (!nilai || typeof nilai !== 'object') return result;
+
+  for (const [key, value] of Object.entries(nilai)) {
+    result[key] = clampNilai(value);
+  }
+
+  return result;
+}
+
+function hapusUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, value]) => value !== undefined)
+  ) as Partial<T>;
+}
+
+function getTanggalMulai(periode: Partial<PeriodePenilaian> | null | undefined) {
+  return (
+    periode?.mulai ??
+    periode?.startDate ??
+    periode?.tanggalMulai ??
+    periode?.awal ??
+    null
+  );
+}
+
+function getTanggalSelesai(periode: Partial<PeriodePenilaian> | null | undefined) {
+  return (
+    periode?.selesai ??
+    periode?.endDate ??
+    periode?.tanggalSelesai ??
+    periode?.akhir ??
+    null
+  );
+}
+
+function getStatusKehadiran(data: Partial<Absensi>): AttendanceStatus | null {
+  const status = data.statusKehadiran ?? data.status;
+  if (status === 'hadir' || status === 'sakit' || status === 'izin') {
+    return status;
+  }
+  return null;
+}
+
+function sortPeriodeDesc(a: PeriodePenilaian, b: PeriodePenilaian) {
+  const aDate = toDateSafe(getTanggalMulai(a)) ?? new Date(0);
+  const bDate = toDateSafe(getTanggalMulai(b)) ?? new Date(0);
+  return bDate.getTime() - aDate.getTime();
+}
+
+function sortKriteriaAsc(a: KriteriaPenilaian, b: KriteriaPenilaian) {
+  return toNumberOrZero(a.urutan) - toNumberOrZero(b.urutan);
+}
+
+/** Ambil semua periode (sort client, tanpa orderBy Firestore) */
 export async function getAllPeriode(): Promise<PeriodePenilaian[]> {
   const db = assertDb();
-  const q = query(collection(db, COLLECTIONS.PERIODE_PENILAIAN), orderBy('mulai', 'desc'));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+  const snap = await getDocs(collection(db, COLLECTIONS.PERIODE_PENILAIAN));
+
+  const items = snap.docs.map((d) => ({
+    id: d.id,
+    ...(d.data() as Omit<PeriodePenilaian, 'id'>),
+  }));
+
+  items.sort(sortPeriodeDesc);
+  return items;
 }
 
 /** Ambil periode aktif */
 export async function getPeriodeAktif(): Promise<PeriodePenilaian | null> {
   const db = assertDb();
-  const q = query(
-    collection(db, COLLECTIONS.PERIODE_PENILAIAN),
-    where('status', '==', 'aktif'),
-    limit(1)
+
+  const snap = await getDocs(
+    query(
+      collection(db, COLLECTIONS.PERIODE_PENILAIAN),
+      where('status', '==', 'aktif'),
+      limit(10)
+    )
   );
-  const snap = await getDocs(q);
+
   if (snap.empty) return null;
-  const d = snap.docs[0];
-  return { id: d.id, ...(d.data() as any) };
+
+  const items = snap.docs.map((d) => ({
+    id: d.id,
+    ...(d.data() as Omit<PeriodePenilaian, 'id'>),
+  }));
+
+  items.sort(sortPeriodeDesc);
+
+  return items[0] ?? null;
 }
 
-/** Ambil penilaian list */
+/**
+ * Ambil list penilaian
+ * Anti-composite-index:
+ * - kalau ada periodeId, query pakai periodeId saja
+ * - kalau tidak ada periodeId tapi ada status, query pakai status saja
+ * - filter sisanya di client
+ */
 export async function getPenilaianList(params: {
   periodeId?: string;
   status?: 'semua' | StatusPenilaian;
 }): Promise<PenilaianKinerja[]> {
   const db = assertDb();
-
   const colRef = collection(db, COLLECTIONS.PENILAIAN_KINERJA);
-  const wheres: any[] = [];
 
-  if (params.periodeId) wheres.push(where('periodeId', '==', params.periodeId));
-  if (params.status && params.status !== 'semua') wheres.push(where('status', '==', params.status));
+  let snap;
+  if (params.periodeId) {
+    snap = await getDocs(query(colRef, where('periodeId', '==', params.periodeId)));
+  } else if (params.status && params.status !== 'semua') {
+    snap = await getDocs(query(colRef, where('status', '==', params.status)));
+  } else {
+    snap = await getDocs(colRef);
+  }
 
-  const q = wheres.length ? query(colRef, ...wheres) : query(colRef);
-  const snap = await getDocs(q);
+  const items = snap.docs.map((d) => ({
+    id: d.id,
+    ...(d.data() as Omit<PenilaianKinerja, 'id'>),
+  }));
 
-  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+  return items.filter((item) => {
+    if (params.periodeId && item.periodeId !== params.periodeId) return false;
+    if (params.status && params.status !== 'semua' && item.status !== params.status) {
+      return false;
+    }
+    return true;
+  });
 }
 
 export async function getKaryawanById(karyawanId: string): Promise<Karyawan | null> {
   const db = assertDb();
   const ref = doc(db, COLLECTIONS.KARYAWAN, karyawanId);
   const snap = await getDoc(ref);
+
   if (!snap.exists()) return null;
-  return { id: snap.id, ...(snap.data() as any) };
+
+  return {
+    id: snap.id,
+    ...(snap.data() as Omit<Karyawan, 'id'>),
+  };
 }
 
 export async function getPeriodeById(periodeId: string): Promise<PeriodePenilaian | null> {
   const db = assertDb();
   const ref = doc(db, COLLECTIONS.PERIODE_PENILAIAN, periodeId);
   const snap = await getDoc(ref);
+
   if (!snap.exists()) return null;
-  return { id: snap.id, ...(snap.data() as any) };
+
+  return {
+    id: snap.id,
+    ...(snap.data() as Omit<PeriodePenilaian, 'id'>),
+  };
 }
 
 /**
- * Ambil kriteria by periode
- * NOTE: where + orderBy bisa butuh index; kalau mau anti-index, hapus orderBy lalu sort client.
+ * Ambil kriteria berdasarkan periode
+ * Anti-index:
+ * - query hanya where('periodeId')
+ * - sorting urutan dilakukan di client
  */
-export async function getKriteriaByPeriode(periodeId: string): Promise<KriteriaPenilaian[]> {
+export async function getKriteriaByPeriode(
+  periodeId: string
+): Promise<KriteriaPenilaian[]> {
   const db = assertDb();
-  const q = query(
-    collection(db, COLLECTIONS.KRITERIA_PENILAIAN),
-    where('periodeId', '==', periodeId),
-    orderBy('urutan', 'asc')
+
+  const snap = await getDocs(
+    query(
+      collection(db, COLLECTIONS.KRITERIA_PENILAIAN),
+      where('periodeId', '==', periodeId)
+    )
   );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+
+  const items = snap.docs.map((d) => ({
+    id: d.id,
+    ...(d.data() as Omit<KriteriaPenilaian, 'id'>),
+  }));
+
+  items.sort(sortKriteriaAsc);
+  return items;
 }
 
-export async function getPenilaianByDocId(docId: string): Promise<PenilaianKinerja | null> {
+export async function getPenilaianByDocId(
+  docId: string
+): Promise<PenilaianKinerja | null> {
   const db = assertDb();
   const ref = doc(db, COLLECTIONS.PENILAIAN_KINERJA, docId);
   const snap = await getDoc(ref);
+
   if (!snap.exists()) return null;
-  return { id: snap.id, ...(snap.data() as any) };
+
+  return {
+    id: snap.id,
+    ...(snap.data() as Omit<PenilaianKinerja, 'id'>),
+  };
 }
 
 /**
- * Nilai akhir berbobot (0..5) → skala 0..100
- * total = sum((nilai/5)*100*(bobot/100))
+ * Rumus final wajib:
+ * total = Σ ( (nilai/5) * 100 * (bobot/100) )
+ * return 2 desimal
  */
 export function hitungNilaiAkhir(params: {
   nilai: Record<string, number> | undefined;
   kriteria: KriteriaPenilaian[];
 }): number {
-  const { nilai, kriteria } = params;
-  if (!nilai) return 0;
+  const nilai = sanitizeNilaiMap(params.nilai);
+  const kriteria = params.kriteria ?? [];
+
   if (!kriteria.length) return 0;
 
   let total = 0;
-  for (const k of kriteria) {
-    const v = typeof nilai[k.id] === 'number' ? nilai[k.id] : 0; // 0..5
-    const bobot = typeof k.bobot === 'number' ? k.bobot : 0;
-    total += (v / 5) * 100 * (bobot / 100);
+
+  for (const item of kriteria) {
+    const skor = clampNilai(nilai[item.id] ?? 0);
+    const bobot = toNumberOrZero(item.bobot);
+
+    total += ((skor / 5) * 100) * (bobot / 100);
   }
+
   return round2(total);
 }
 
 /**
- * Attendance summary sinkron aturan final:
+ * Summary absensi final:
  * - Hari kerja: Senin–Sabtu
- * - Minggu libur
- * - Alpha otomatis
- * - Query anti-index: where('karyawanId'), range difilter client
+ * - Minggu tidak dihitung
+ * - Alpha tidak disimpan, dihitung otomatis
+ * - Query Firestore anti-index: where('karyawanId') lalu filter tanggal di client
  */
 export async function getAttendanceSummary(params: {
   karyawanId: string;
@@ -275,15 +349,16 @@ export async function getAttendanceSummary(params: {
   const startD = startOfDay(start);
   const endD = startOfDay(end);
 
-  // total hari kerja (Senin–Sabtu)
   let totalHariKerja = 0;
   const cur = new Date(startD);
+
   while (cur <= endD) {
-    if (!isSunday(cur)) totalHariKerja += 1;
+    if (!isSunday(cur)) {
+      totalHariKerja += 1;
+    }
     cur.setDate(cur.getDate() + 1);
   }
 
-  // query absensi by karyawanId (anti-index)
   const snap = await getDocs(
     query(
       collection(db, COLLECTIONS.ABSENSI),
@@ -297,26 +372,31 @@ export async function getAttendanceSummary(params: {
   let izinHari = 0;
 
   snap.forEach((d) => {
-    const data = d.data() as any as Attendance;
-
+    const data = d.data() as Absensi;
     const tgl = toDateSafe(data.tanggal);
     if (!tgl) return;
 
-    const t = startOfDay(tgl);
-    if (t < startD || t > endD) return;
+    const tanggalOnly = startOfDay(tgl);
 
-    if (isSunday(t)) return;
+    if (tanggalOnly < startD || tanggalOnly > endD) return;
+    if (isSunday(tanggalOnly)) return;
 
-    const st = (data.statusKehadiran ?? data.status) as AttendanceStatus | undefined;
+    const st = getStatusKehadiran(data);
 
     if (st === 'hadir') hadirHari += 1;
     else if (st === 'sakit') sakitHari += 1;
     else if (st === 'izin') izinHari += 1;
   });
 
-  const alphaHari = Math.max(totalHariKerja - (hadirHari + sakitHari + izinHari), 0);
+  const alphaHari = Math.max(
+    totalHariKerja - (hadirHari + sakitHari + izinHari),
+    0
+  );
 
-  const hadirPersen = totalHariKerja ? Math.round((hadirHari / totalHariKerja) * 100) : 0;
+  const hadirPersen = totalHariKerja
+    ? Math.round((hadirHari / totalHariKerja) * 100)
+    : 0;
+
   const sakitIzinPersen = totalHariKerja
     ? Math.round(((sakitHari + izinHari) / totalHariKerja) * 100)
     : 0;
@@ -333,38 +413,57 @@ export async function getAttendanceSummary(params: {
 }
 
 /**
- * ✅ SUBMIT evaluasi admin (FIX undefined)
- * - simpan nilaiAdmin + catatanAdmin
- * - simpan totalNilaiAdmin (cached)
- * - optional: simpan totalNilaiKaryawan juga (cached) agar LIST/LAPORAN sinkron
+ * Submit evaluasi admin
+ * FINAL:
+ * - simpan nilaiAdmin
+ * - simpan catatanAdmin
+ * - simpan totalNilai
+ * - status = 'dinilai'
+ * - jangan kirim undefined ke Firestore
+ *
+ * Catatan:
+ * totalNilai dihitung otomatis dari nilaiAdmin + bobot kriteria.
+ * Kalau caller masih mengirim totalNilai / totalNilaiAdmin, tetap aman
+ * karena file ini akan memakai nilai yang valid dan menyimpan ke field final: totalNilai
  */
 export async function submitEvaluasiAdmin(params: {
   penilaianId: string;
   nilaiAdmin: Record<string, number>;
   catatanAdmin: string;
-  totalNilaiAdmin?: number; // ✅ optional biar fleksibel
-  totalNilaiKaryawan?: number; // ✅ optional
+  totalNilai?: number;
+  totalNilaiAdmin?: number;
 }) {
   const db = assertDb();
   const ref = doc(db, COLLECTIONS.PENILAIAN_KINERJA, params.penilaianId);
 
-  // ✅ Firestore tidak boleh undefined
-  const safeTotalAdmin = round2(toNumberOrZero(params.totalNilaiAdmin));
-  const safeTotalKaryawan =
-    params.totalNilaiKaryawan === undefined ? undefined : round2(toNumberOrZero(params.totalNilaiKaryawan));
+  const penilaianSnap = await getDoc(ref);
+  if (!penilaianSnap.exists()) {
+    throw new Error('Data penilaian tidak ditemukan.');
+  }
 
-  const payload: any = {
-    nilaiAdmin: params.nilaiAdmin ?? {},
+  const penilaian = {
+    id: penilaianSnap.id,
+    ...(penilaianSnap.data() as Omit<PenilaianKinerja, 'id'>),
+  } as PenilaianKinerja;
+
+  const kriteria = await getKriteriaByPeriode(penilaian.periodeId);
+  const safeNilaiAdmin = sanitizeNilaiMap(params.nilaiAdmin);
+
+  const totalDariRumus = hitungNilaiAkhir({
+    nilai: safeNilaiAdmin,
+    kriteria,
+  });
+
+  const fallbackTotal = toNumberOrZero(params.totalNilai ?? params.totalNilaiAdmin);
+  const totalNilai = round2(totalDariRumus || fallbackTotal);
+
+  const payload = hapusUndefined({
+    nilaiAdmin: safeNilaiAdmin,
     catatanAdmin: params.catatanAdmin ?? '',
-    totalNilaiAdmin: safeTotalAdmin,
-    status: 'dinilai',
+    totalNilai,
+    status: 'dinilai' as StatusPenilaian,
     updatedAt: serverTimestamp(),
-  };
+  });
 
-  // hanya set kalau dikirim, biar gak overwrite sembarangan
-  if (safeTotalKaryawan !== undefined) payload.totalNilaiKaryawan = safeTotalKaryawan;
-
-  const batch = writeBatch(db);
-  batch.update(ref, payload);
-  await batch.commit();
+  await updateDoc(ref, payload);
 }

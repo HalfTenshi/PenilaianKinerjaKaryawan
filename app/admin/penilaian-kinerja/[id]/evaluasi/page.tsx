@@ -24,6 +24,26 @@ function toNumberSafe(v: any) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function getTanggalMulai(periode: Partial<PeriodePenilaian> | null | undefined) {
+  return (
+    periode?.mulai ??
+    periode?.startDate ??
+    periode?.tanggalMulai ??
+    periode?.awal ??
+    null
+  );
+}
+
+function getTanggalSelesai(periode: Partial<PeriodePenilaian> | null | undefined) {
+  return (
+    periode?.selesai ??
+    periode?.endDate ??
+    periode?.tanggalSelesai ??
+    periode?.akhir ??
+    null
+  );
+}
+
 export default function EvaluasiPage() {
   const params = useParams();
   const router = useRouter();
@@ -39,11 +59,9 @@ export default function EvaluasiPage() {
   const [periode, setPeriode] = useState<PeriodePenilaian | null>(null);
   const [kriteria, setKriteria] = useState<KriteriaPenilaian[]>([]);
 
-  // form state (admin)
   const [nilaiAdmin, setNilaiAdmin] = useState<Record<string, number>>({});
   const [catatan, setCatatan] = useState('');
 
-  // attendance summary
   const [hadirHari, setHadirHari] = useState(0);
   const [hadirPersen, setHadirPersen] = useState(0);
 
@@ -71,17 +89,16 @@ export default function EvaluasiPage() {
         setPeriode(per);
         setKriteria(kri);
 
-        // init form
         setNilaiAdmin(p.nilaiAdmin ?? {});
         setCatatan(p.catatanAdmin ?? '');
 
-        // attendance summary
         try {
           const sum = await getAttendanceSummary({
             karyawanId: p.karyawanId,
-            mulai: per.mulai,
-            selesai: per.selesai,
+            mulai: getTanggalMulai(per),
+            selesai: getTanggalSelesai(per),
           });
+
           if (!mounted) return;
           setHadirHari(sum.hadirHari);
           setHadirPersen(sum.hadirPersen);
@@ -122,12 +139,10 @@ export default function EvaluasiPage() {
     });
   }, [kriteria, nilaiAdmin, penilaian?.nilaiKaryawan]);
 
-  // ✅ total nilai karyawan (berbobot) realtime
   const totalNilaiKaryawan = useMemo(() => {
     return hitungNilaiAkhir({ nilai: penilaian?.nilaiKaryawan, kriteria });
   }, [penilaian?.nilaiKaryawan, kriteria]);
 
-  // ✅ total nilai admin (berbobot) realtime
   const totalNilaiAdmin = useMemo(() => {
     return hitungNilaiAkhir({ nilai: nilaiAdmin, kriteria });
   }, [nilaiAdmin, kriteria]);
@@ -147,8 +162,6 @@ export default function EvaluasiPage() {
         penilaianId,
         nilaiAdmin,
         catatanAdmin: catatan,
-        totalNilaiAdmin: toNumberSafe(totalNilaiAdmin), // ✅ aman (bukan undefined)
-        totalNilaiKaryawan: toNumberSafe(totalNilaiKaryawan), // ✅ opsional cache biar sinkron
       });
 
       alert('Evaluasi berhasil disimpan!');
@@ -184,13 +197,12 @@ export default function EvaluasiPage() {
   }
 
   const catatanKaryawanText =
-    (penilaian as any)?.catatanKaryawan && String((penilaian as any).catatanKaryawan).trim()
-      ? String((penilaian as any).catatanKaryawan)
+    penilaian?.catatanKaryawan && String(penilaian.catatanKaryawan).trim()
+      ? String(penilaian.catatanKaryawan)
       : 'Tidak ada catatan dari karyawan.';
 
   return (
     <div className="space-y-6 ml-80 mt-28">
-      {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-blue-700 font-medium">
         <Link href="/admin/penilaian-kinerja" className="hover:text-blue-900">
           Penilaian Kinerja
@@ -199,15 +211,12 @@ export default function EvaluasiPage() {
         <span>Evaluasi</span>
       </div>
 
-      {/* Page Title */}
       <div>
         <h1 className="text-4xl font-bold text-blue-900">Evaluasi Penilaian Kerja</h1>
       </div>
 
-      {/* Profile Card */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
         <div className="flex gap-8">
-          {/* Photo */}
           <div className="flex-shrink-0">
             <div className="w-40 h-44 bg-gray-200 rounded-lg overflow-hidden border border-gray-300">
               <Image
@@ -222,7 +231,6 @@ export default function EvaluasiPage() {
             </div>
           </div>
 
-          {/* Employee Info */}
           <div className="flex-1 space-y-6">
             <div>
               <h2 className="text-2xl font-bold text-blue-900">{karyawan?.nama ?? penilaian.karyawanId}</h2>
@@ -248,16 +256,15 @@ export default function EvaluasiPage() {
             </div>
           </div>
 
-          {/* Score Card Admin */}
           <div className="bg-blue-50 rounded-lg p-6 w-72 flex flex-col gap-6 border border-blue-100">
             <div className="flex items-center gap-3">
               <div className="text-2xl">📊</div>
               <div>
                 <p className="text-sm text-gray-600">Total</p>
-                <p className="text-sm text-gray-600">Nilai Akhir (Admin)</p>
+                <p className="text-sm text-gray-600">Nilai Akhir</p>
               </div>
             </div>
-            <div className="text-4xl font-bold text-blue-900">{totalNilaiAdmin}</div>
+            <div className="text-4xl font-bold text-blue-900">{totalNilaiAdmin.toFixed(2)}</div>
 
             <div className="border-t border-blue-200 pt-4">
               <p className="text-sm text-gray-700 mb-2">Hadir : {hadirHari} Hari</p>
@@ -267,9 +274,7 @@ export default function EvaluasiPage() {
         </div>
       </div>
 
-      {/* ✅ Card tambahan nyambung style */}
       <div className="grid grid-cols-2 gap-6">
-        {/* Total nilai karyawan */}
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-blue-900">Ringkasan Karyawan</h3>
@@ -278,14 +283,13 @@ export default function EvaluasiPage() {
             </span>
           </div>
 
-          <p className="text-sm text-gray-600">Total Nilai (berbobot)</p>
-          <p className="text-4xl font-bold text-blue-900 mt-1">{totalNilaiKaryawan}</p>
+          <p className="text-sm text-gray-600">Total Nilai Karyawan</p>
+          <p className="text-4xl font-bold text-blue-900 mt-1">{totalNilaiKaryawan.toFixed(2)}</p>
           <p className="text-xs text-gray-500 mt-2">
-            Diambil dari <b>nilaiKaryawan</b> per-kriteria (0..5) × bobot (%).
+            Dihitung dari <b>nilaiKaryawan</b> per-kriteria (0–5) × bobot (%).
           </p>
         </div>
 
-        {/* Catatan karyawan */}
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-blue-900">Catatan Karyawan</h3>
@@ -304,7 +308,6 @@ export default function EvaluasiPage() {
         </div>
       </div>
 
-      {/* Hasil Penilaian Kriteria */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
         <div className="border-b border-gray-300 pb-4 mb-6">
           <h3 className="text-lg font-semibold text-blue-900">Hasil Penilaian Kriteria</h3>
@@ -355,7 +358,6 @@ export default function EvaluasiPage() {
           </table>
         </div>
 
-        {/* Catatan Admin */}
         <div className="mt-6 pt-6 border-t border-gray-200 space-y-3">
           <h4 className="font-semibold text-blue-900">Catatan Admin</h4>
           <textarea
@@ -366,16 +368,14 @@ export default function EvaluasiPage() {
           />
         </div>
 
-        {/* Total Nilai Admin */}
         <div className="mt-6 pt-6 bg-blue-50 rounded-lg p-6 flex justify-center">
           <div className="text-center">
-            <p className="text-blue-700 font-medium mb-2">Total Nilai Admin :</p>
-            <p className="text-4xl font-bold text-blue-900">{totalNilaiAdmin}</p>
+            <p className="text-blue-700 font-medium mb-2">Total Nilai Akhir :</p>
+            <p className="text-4xl font-bold text-blue-900">{totalNilaiAdmin.toFixed(2)}</p>
           </div>
         </div>
       </div>
 
-      {/* Action Buttons */}
       <div className="flex justify-end gap-3">
         <Link
           href="/admin/penilaian-kinerja"

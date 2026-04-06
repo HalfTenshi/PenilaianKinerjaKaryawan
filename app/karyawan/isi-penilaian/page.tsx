@@ -20,9 +20,17 @@ import { CardSection } from '@/components/CardSection';
 
 type PeriodePenilaianDoc = {
   namaPeriode: string;
-  mulai?: any;
-  selesai?: any;
   status: 'aktif' | 'ditutup';
+
+  mulai?: any;
+  startDate?: any;
+  tanggalMulai?: any;
+  awal?: any;
+
+  selesai?: any;
+  endDate?: any;
+  tanggalSelesai?: any;
+  akhir?: any;
 };
 
 type KriteriaPenilaianDoc = {
@@ -37,28 +45,77 @@ type PenilaianKinerjaDoc = {
   karyawanId: string;
   status: 'draft' | 'dikirim' | 'dinilai';
 
-  nilaiKaryawan: Record<string, number>; // key = kriteriaId
-  catatanKaryawan: string;
-
-  // ✅ simpan total berbobot biar sinkron
-  totalNilaiKaryawan?: number;
+  nilaiKaryawan: Record<string, number>;
+  catatanKaryawan?: string;
 
   nilaiAdmin?: Record<string, number>;
   catatanAdmin?: string;
-  totalNilaiAdmin?: number;
+
+  totalNilai?: number;
 
   createdAt?: any;
   updatedAt?: any;
 };
 
-function formatTanggalRange(mulai: any, selesai: any) {
+function toDateSafe(value: any): Date | null {
+  if (!value) return null;
+
+  if (typeof value?.toDate === 'function') {
+    return value.toDate();
+  }
+
+  if (value instanceof Date) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const [y, m, d] = value.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function getTanggalMulai(periode?: PeriodePenilaianDoc | null) {
+  return (
+    periode?.mulai ??
+    periode?.startDate ??
+    periode?.tanggalMulai ??
+    periode?.awal ??
+    null
+  );
+}
+
+function getTanggalSelesai(periode?: PeriodePenilaianDoc | null) {
+  return (
+    periode?.selesai ??
+    periode?.endDate ??
+    periode?.tanggalSelesai ??
+    periode?.akhir ??
+    null
+  );
+}
+
+function formatTanggalRange(periode?: PeriodePenilaianDoc | null) {
   try {
-    const s = mulai?.toDate ? mulai.toDate() : mulai instanceof Date ? mulai : null;
-    const e = selesai?.toDate ? selesai.toDate() : selesai instanceof Date ? selesai : null;
+    const s = toDateSafe(getTanggalMulai(periode));
+    const e = toDateSafe(getTanggalSelesai(periode));
+
     if (!s || !e) return '-';
 
     const fmt = (d: Date) =>
-      new Intl.DateTimeFormat('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }).format(d);
+      new Intl.DateTimeFormat('id-ID', {
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
+      }).format(d);
 
     return `${fmt(s)} - ${fmt(e)}`;
   } catch {
@@ -66,7 +123,27 @@ function formatTanggalRange(mulai: any, selesai: any) {
   }
 }
 
-/** ✅ hitung total berbobot dari nilai (0..5) & kriteria bobot% */
+function clampNilai(value: any) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  if (n < 0) return 0;
+  if (n > 5) return 5;
+  return n;
+}
+
+function sanitizeNilaiMap(nilai?: Record<string, number>) {
+  const result: Record<string, number> = {};
+
+  if (!nilai || typeof nilai !== 'object') return result;
+
+  for (const [key, value] of Object.entries(nilai)) {
+    result[key] = clampNilai(value);
+  }
+
+  return result;
+}
+
+/** total = Σ ( (nilai/5) * 100 * (bobot/100) ) */
 function hitungTotalBerbobot(params: {
   nilai: Record<string, number>;
   kriteria: Array<{ id: string; data: KriteriaPenilaianDoc }>;
@@ -75,11 +152,12 @@ function hitungTotalBerbobot(params: {
   if (!kriteria.length) return 0;
 
   let total = 0;
-  for (const k of kriteria) {
-    const v = typeof nilai[k.id] === 'number' ? nilai[k.id] : 0; // 0..5
-    const bobot = typeof k.data.bobot === 'number' ? k.data.bobot : 0; // %
-    total += (v / 5) * 100 * (bobot / 100);
+  for (const item of kriteria) {
+    const skor = clampNilai(nilai[item.id] ?? 0);
+    const bobot = Number(item.data.bobot ?? 0);
+    total += ((skor / 5) * 100) * (bobot / 100);
   }
+
   return Math.round(total * 100) / 100;
 }
 
@@ -106,9 +184,11 @@ export default function IsiPenilaianPage() {
     return `${karyawanId}_${periodeAktif.id}`;
   }, [karyawanId, periodeAktif?.id]);
 
-  // ✅ total karyawan realtime untuk ditampilkan (optional)
-  const totalNilaiKaryawan = useMemo(() => {
-    return hitungTotalBerbobot({ nilai: nilaiKaryawan || {}, kriteria });
+  const totalNilaiSementara = useMemo(() => {
+    return hitungTotalBerbobot({
+      nilai: sanitizeNilaiMap(nilaiKaryawan),
+      kriteria,
+    });
   }, [nilaiKaryawan, kriteria]);
 
   useEffect(() => {
@@ -125,7 +205,7 @@ export default function IsiPenilaianPage() {
 
       try {
         const snapPeriode = await getDocs(
-          query(collection(db, 'periode_penilaian'), where('status', '==', 'aktif'), limit(1))
+          query(collection(db, 'periode_penilaian'), where('status', '==', 'aktif'), limit(10))
         );
 
         if (snapPeriode.empty) {
@@ -138,14 +218,33 @@ export default function IsiPenilaianPage() {
           return;
         }
 
-        const pDoc = snapPeriode.docs[0];
-        const pData = pDoc.data() as PeriodePenilaianDoc;
+        const periodeList = snapPeriode.docs
+          .map((d) => ({
+            id: d.id,
+            data: d.data() as PeriodePenilaianDoc,
+          }))
+          .sort((a, b) => {
+            const aDate = toDateSafe(getTanggalMulai(a.data)) ?? new Date(0);
+            const bDate = toDateSafe(getTanggalMulai(b.data)) ?? new Date(0);
+            return bDate.getTime() - aDate.getTime();
+          });
 
-        const periode = { id: pDoc.id, data: pData };
+        const periode = periodeList[0] ?? null;
+
+        if (!periode) {
+          setPeriodeAktif(null);
+          setKriteria([]);
+          setNilaiKaryawan({});
+          setCatatanKaryawan('');
+          setStatusPenilaian('draft');
+          setLoading(false);
+          return;
+        }
+
         setPeriodeAktif(periode);
 
         const snapKriteria = await getDocs(
-          query(collection(db, 'kriteria_penilaian'), where('periodeId', '==', pDoc.id))
+          query(collection(db, 'kriteria_penilaian'), where('periodeId', '==', periode.id))
         );
 
         const kriteriaList = snapKriteria.docs
@@ -157,15 +256,14 @@ export default function IsiPenilaianPage() {
 
         setKriteria(kriteriaList);
 
-        const idPenilaian = `${karyawanId}_${pDoc.id}`;
-        const refPenilaian = doc(db, 'penilaian_kinerja', idPenilaian);
+        const refPenilaian = doc(db, 'penilaian_kinerja', `${karyawanId}_${periode.id}`);
         const snapPenilaian = await getDoc(refPenilaian);
 
         if (snapPenilaian.exists()) {
           const data = snapPenilaian.data() as PenilaianKinerjaDoc;
-          setNilaiKaryawan(data.nilaiKaryawan || {});
-          setCatatanKaryawan(data.catatanKaryawan || '');
-          setStatusPenilaian(data.status || 'draft');
+          setNilaiKaryawan(sanitizeNilaiMap(data.nilaiKaryawan ?? {}));
+          setCatatanKaryawan(data.catatanKaryawan ?? '');
+          setStatusPenilaian(data.status ?? 'draft');
         } else {
           setNilaiKaryawan({});
           setCatatanKaryawan('');
@@ -175,10 +273,9 @@ export default function IsiPenilaianPage() {
         setLoading(false);
       } catch (e: any) {
         console.error(e);
-        const msg =
-          e?.code
-            ? `Gagal memuat data penilaian (${e.code}). ${e?.message ?? ''}`
-            : 'Gagal memuat data penilaian. Coba refresh halaman.';
+        const msg = e?.code
+          ? `Gagal memuat data penilaian (${e.code}). ${e?.message ?? ''}`
+          : 'Gagal memuat data penilaian. Coba refresh halaman.';
         setError(msg);
         setLoading(false);
       }
@@ -189,7 +286,12 @@ export default function IsiPenilaianPage() {
 
   const handleRatingChange = (kriteriaId: string, rating: number) => {
     if (statusPenilaian !== 'draft') return;
-    setNilaiKaryawan((prev) => ({ ...prev, [kriteriaId]: rating }));
+
+    const safeRating = Math.max(1, Math.min(5, rating));
+    setNilaiKaryawan((prev) => ({
+      ...prev,
+      [kriteriaId]: safeRating,
+    }));
   };
 
   const handleSimpanDraft = async () => {
@@ -204,15 +306,13 @@ export default function IsiPenilaianPage() {
       const ref = doc(db, 'penilaian_kinerja', penilaianId);
       const existing = await getDoc(ref);
 
-      const total = hitungTotalBerbobot({ nilai: nilaiKaryawan || {}, kriteria });
-
-      const payload: Partial<PenilaianKinerjaDoc> = {
+      const payload: any = {
+        id: penilaianId,
         periodeId: periodeAktif.id,
         karyawanId,
         status: 'draft',
-        nilaiKaryawan: nilaiKaryawan || {},
-        catatanKaryawan: catatanKaryawan || '',
-        totalNilaiKaryawan: total, // ✅ simpan
+        nilaiKaryawan: sanitizeNilaiMap(nilaiKaryawan),
+        catatanKaryawan: catatanKaryawan ?? '',
         updatedAt: serverTimestamp(),
         ...(existing.exists() ? {} : { createdAt: serverTimestamp() }),
       };
@@ -223,10 +323,9 @@ export default function IsiPenilaianPage() {
       setStatusPenilaian('draft');
     } catch (e: any) {
       console.error(e);
-      const msg =
-        e?.code
-          ? `Gagal menyimpan draft (${e.code}). ${e?.message ?? ''}`
-          : 'Gagal menyimpan draft. Periksa koneksi atau rules Firestore.';
+      const msg = e?.code
+        ? `Gagal menyimpan draft (${e.code}). ${e?.message ?? ''}`
+        : 'Gagal menyimpan draft. Periksa koneksi atau rules Firestore.';
       setError(msg);
     } finally {
       setSaving(false);
@@ -239,7 +338,7 @@ export default function IsiPenilaianPage() {
     if (!penilaianId) return;
 
     const totalKriteria = kriteria.length;
-    const terisi = Object.keys(nilaiKaryawan || {}).length;
+    const terisi = Object.keys(sanitizeNilaiMap(nilaiKaryawan)).length;
 
     if (totalKriteria > 0 && terisi < totalKriteria) {
       alert(`Masih ada kriteria yang belum diisi. Terisi ${terisi}/${totalKriteria}.`);
@@ -253,15 +352,13 @@ export default function IsiPenilaianPage() {
       const ref = doc(db, 'penilaian_kinerja', penilaianId);
       const existing = await getDoc(ref);
 
-      const total = hitungTotalBerbobot({ nilai: nilaiKaryawan || {}, kriteria });
-
-      const payload: Partial<PenilaianKinerjaDoc> = {
+      const payload: any = {
+        id: penilaianId,
         periodeId: periodeAktif.id,
         karyawanId,
         status: 'dikirim',
-        nilaiKaryawan: nilaiKaryawan || {},
-        catatanKaryawan: catatanKaryawan || '',
-        totalNilaiKaryawan: total, // ✅ simpan
+        nilaiKaryawan: sanitizeNilaiMap(nilaiKaryawan),
+        catatanKaryawan: catatanKaryawan ?? '',
         updatedAt: serverTimestamp(),
         ...(existing.exists() ? {} : { createdAt: serverTimestamp() }),
       };
@@ -273,10 +370,9 @@ export default function IsiPenilaianPage() {
       router.push('/karyawan/riwayat');
     } catch (e: any) {
       console.error(e);
-      const msg =
-        e?.code
-          ? `Gagal mengirim penilaian (${e.code}). ${e?.message ?? ''}`
-          : 'Gagal mengirim penilaian. Periksa koneksi atau rules Firestore.';
+      const msg = e?.code
+        ? `Gagal mengirim penilaian (${e.code}). ${e?.message ?? ''}`
+        : 'Gagal mengirim penilaian. Periksa koneksi atau rules Firestore.';
       setError(msg);
     } finally {
       setSaving(false);
@@ -305,10 +401,7 @@ export default function IsiPenilaianPage() {
     );
   }
 
-  const periodeRange = periodeAktif
-    ? formatTanggalRange(periodeAktif.data.mulai, periodeAktif.data.selesai)
-    : '-';
-
+  const periodeRange = periodeAktif ? formatTanggalRange(periodeAktif.data) : '-';
   const isReadOnly = statusPenilaian !== 'draft';
 
   return (
@@ -345,10 +438,12 @@ export default function IsiPenilaianPage() {
         <p className="text-gray-700">Silahkan isi nilai penilaian kerja anda pada periode ini :</p>
       </CardSection>
 
-      {/* ✅ optional tampil total karyawan realtime */}
       <CardSection>
-        <p className="text-sm text-gray-600">Total Nilai Karyawan (berbobot)</p>
-        <p className="text-2xl font-bold text-blue-700">{totalNilaiKaryawan}</p>
+        <p className="text-sm text-gray-600">Total Nilai Sementara</p>
+        <p className="text-2xl font-bold text-blue-700">{totalNilaiSementara.toFixed(2)}</p>
+        <p className="text-xs text-gray-500 mt-1">
+          Nilai ini hanya untuk preview perhitungan dari input karyawan, tidak disimpan sebagai field cache lama.
+        </p>
       </CardSection>
 
       <CardSection title="Kriteria Penilaian">

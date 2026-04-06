@@ -37,6 +37,31 @@ function escapeHtml(value: string) {
     .replaceAll("'", '&#039;');
 }
 
+function getTanggalMulai(periode: Partial<PeriodePenilaian> | null | undefined) {
+  return (
+    (periode as any)?.mulai ??
+    (periode as any)?.startDate ??
+    (periode as any)?.tanggalMulai ??
+    (periode as any)?.awal ??
+    null
+  );
+}
+
+function getTanggalSelesai(periode: Partial<PeriodePenilaian> | null | undefined) {
+  return (
+    (periode as any)?.selesai ??
+    (periode as any)?.endDate ??
+    (periode as any)?.tanggalSelesai ??
+    (periode as any)?.akhir ??
+    null
+  );
+}
+
+function toNumberOrZero(value: any) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export default function LaporanPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -91,9 +116,7 @@ export default function LaporanPage() {
       setError(null);
 
       try {
-        const periodeObj = selectedPeriode
-          ? await getPeriodeById(selectedPeriode)
-          : null;
+        const periodeObj = selectedPeriode ? await getPeriodeById(selectedPeriode) : null;
 
         const [penilaianList, allAktif] = await Promise.all([
           getPenilaianUntukLaporan({
@@ -122,9 +145,7 @@ export default function LaporanPage() {
         let belumIsi = 0;
 
         if (selectedPeriode) {
-          const penilaianAllStatus = await getPenilaianByPeriodeAllStatus(
-            selectedPeriode
-          );
+          const penilaianAllStatus = await getPenilaianByPeriodeAllStatus(selectedPeriode);
 
           const setSudahIsi = new Set<string>();
           for (const p of penilaianAllStatus as any[]) {
@@ -142,10 +163,7 @@ export default function LaporanPage() {
         }
 
         const karyawanCache = new Map<string, Karyawan | null>();
-        const kriteriaCache = new Map<
-          string,
-          Awaited<ReturnType<typeof getKriteriaByPeriode>>
-        >();
+        const kriteriaCache = new Map<string, Awaited<ReturnType<typeof getKriteriaByPeriode>>>();
         const periodeCache = new Map<string, PeriodePenilaian | null>();
 
         const result = await Promise.all(
@@ -176,10 +194,12 @@ export default function LaporanPage() {
               kriteriaCache.set(p.periodeId, kriteria);
             }
 
-            const nilaiAkhir = hitungNilaiAkhir({
-              nilai: p.nilaiAdmin,
-              kriteria,
-            });
+            const nilaiAkhir = Number.isFinite(Number((p as any)?.totalNilai))
+              ? toNumberOrZero((p as any).totalNilai)
+              : hitungNilaiAkhir({
+                  nilai: p.nilaiAdmin,
+                  kriteria,
+                });
 
             let hadirPersen = 0;
             let sakitIzinPersen = 0;
@@ -188,8 +208,8 @@ export default function LaporanPage() {
               try {
                 const sum = await getAttendanceSummary({
                   karyawanId: p.karyawanId,
-                  mulai: per.mulai,
-                  selesai: per.selesai,
+                  mulai: getTanggalMulai(per),
+                  selesai: getTanggalSelesai(per),
                 });
 
                 hadirPersen = sum.hadirPersen;
@@ -200,8 +220,7 @@ export default function LaporanPage() {
             }
 
             return {
-              penilaianId:
-                p.id ?? p.penilaianId ?? `${p.karyawanId}_${p.periodeId}`,
+              penilaianId: p.id ?? p.penilaianId ?? `${p.karyawanId}_${p.periodeId}`,
               nama: karyawan?.nama ?? p.karyawanId,
               divisi,
               hadir: hadirPersen,
@@ -243,9 +262,7 @@ export default function LaporanPage() {
 
   const rataRataPerforma = useMemo(() => {
     if (!rows.length) return '0.0';
-    const avg =
-      rows.reduce((sum, item) => sum + (Number(item.nilaiAkhir) || 0), 0) /
-      rows.length;
+    const avg = rows.reduce((sum, item) => sum + (Number(item.nilaiAkhir) || 0), 0) / rows.length;
     return avg.toFixed(1);
   }, [rows]);
 
@@ -263,10 +280,7 @@ export default function LaporanPage() {
 
   const labelPeriodeCard = useMemo(() => {
     if (!selectedPeriode) return 'Semua Periode';
-    return (
-      periodeOptions.find((p) => p.id === selectedPeriode)?.namaPeriode ??
-      'Periode terpilih'
-    );
+    return periodeOptions.find((p) => p.id === selectedPeriode)?.namaPeriode ?? 'Periode terpilih';
   }, [selectedPeriode, periodeOptions]);
 
   const handlePrintPDF = (item: ReportRow) => {
@@ -361,16 +375,12 @@ export default function LaporanPage() {
   return (
     <div className="ml-80 mt-28 space-y-6">
       <div>
-        <h1 className="text-4xl font-bold text-gray-900">
-          Laporan Kinerja Karyawan
-        </h1>
+        <h1 className="text-4xl font-bold text-gray-900">Laporan Kinerja Karyawan</h1>
       </div>
 
       <div className="flex items-end gap-4">
         <div>
-          <label className="mb-2 block text-sm font-medium text-gray-700">
-            Semua Periode
-          </label>
+          <label className="mb-2 block text-sm font-medium text-gray-700">Semua Periode</label>
           <select
             value={selectedPeriode || ''}
             onChange={(e) => {
@@ -389,9 +399,7 @@ export default function LaporanPage() {
         </div>
 
         <div>
-          <label className="mb-2 block text-sm font-medium text-gray-700">
-            Semua Divisi
-          </label>
+          <label className="mb-2 block text-sm font-medium text-gray-700">Semua Divisi</label>
           <select
             value={selectedDivisi || ''}
             onChange={(e) => {
@@ -410,9 +418,7 @@ export default function LaporanPage() {
         </div>
 
         <div className="flex-1">
-          <label className="mb-2 block text-sm font-medium text-gray-700">
-            Cari karyawan...
-          </label>
+          <label className="mb-2 block text-sm font-medium text-gray-700">Cari karyawan...</label>
 
           <div className="flex w-full items-center gap-3">
             <input
@@ -452,9 +458,7 @@ export default function LaporanPage() {
       {!loading && !error && (
         <div className="grid grid-cols-2 gap-6">
           <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-semibold text-gray-900">
-              Total karyawan aktif
-            </h3>
+            <h3 className="mb-4 text-lg font-semibold text-gray-900">Total karyawan aktif</h3>
 
             <div className="space-y-2">
               <p className="text-sm text-gray-600">{labelPeriodeCard}</p>
@@ -478,15 +482,11 @@ export default function LaporanPage() {
           </div>
 
           <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-semibold text-gray-900">
-              Nilai rata-rata performa karyawan
-            </h3>
+            <h3 className="mb-4 text-lg font-semibold text-gray-900">Nilai rata-rata performa karyawan</h3>
 
             <div>
               <p className="text-sm text-gray-600">{labelPeriodeCard}</p>
-              <p className="text-4xl font-bold text-gray-900">
-                {rataRataPerforma}
-              </p>
+              <p className="text-4xl font-bold text-gray-900">{rataRataPerforma}</p>
             </div>
           </div>
         </div>
@@ -498,48 +498,25 @@ export default function LaporanPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-300 bg-gray-50">
-                  <th className="px-6 py-3 text-left font-semibold text-gray-900">
-                    No
-                  </th>
-                  <th className="px-6 py-3 text-left font-semibold text-gray-900">
-                    Nama
-                  </th>
-                  <th className="px-6 py-3 text-left font-semibold text-gray-900">
-                    Divisi
-                  </th>
-                  <th className="px-6 py-3 text-left font-semibold text-gray-900">
-                    Hadir (%)
-                  </th>
-                  <th className="px-6 py-3 text-left font-semibold text-gray-900">
-                    Sakit/izin (%)
-                  </th>
-                  <th className="px-6 py-3 text-left font-semibold text-gray-900">
-                    Nilai Akhir
-                  </th>
-                  <th className="px-6 py-3 text-left font-semibold text-gray-900">
-                    Aksi
-                  </th>
+                  <th className="px-6 py-3 text-left font-semibold text-gray-900">No</th>
+                  <th className="px-6 py-3 text-left font-semibold text-gray-900">Nama</th>
+                  <th className="px-6 py-3 text-left font-semibold text-gray-900">Divisi</th>
+                  <th className="px-6 py-3 text-left font-semibold text-gray-900">Hadir (%)</th>
+                  <th className="px-6 py-3 text-left font-semibold text-gray-900">Sakit/izin (%)</th>
+                  <th className="px-6 py-3 text-left font-semibold text-gray-900">Nilai Akhir</th>
+                  <th className="px-6 py-3 text-left font-semibold text-gray-900">Aksi</th>
                 </tr>
               </thead>
 
               <tbody>
                 {currentData.map((item, idx) => (
-                  <tr
-                    key={item.penilaianId}
-                    className="border-b border-gray-200 hover:bg-gray-50"
-                  >
-                    <td className="px-6 py-4 text-gray-900">
-                      {startIndex + idx + 1}
-                    </td>
-                    <td className="px-6 py-4 font-medium text-gray-900">
-                      {item.nama}
-                    </td>
+                  <tr key={item.penilaianId} className="border-b border-gray-200 hover:bg-gray-50">
+                    <td className="px-6 py-4 text-gray-900">{startIndex + idx + 1}</td>
+                    <td className="px-6 py-4 font-medium text-gray-900">{item.nama}</td>
                     <td className="px-6 py-4 text-gray-900">{item.divisi}</td>
                     <td className="px-6 py-4 text-gray-900">{item.hadir}%</td>
                     <td className="px-6 py-4 text-gray-900">{item.sakit}%</td>
-                    <td className="px-6 py-4 font-semibold text-gray-900">
-                      {item.nilaiAkhir}
-                    </td>
+                    <td className="px-6 py-4 font-semibold text-gray-900">{item.nilaiAkhir}</td>
                     <td className="flex gap-3 px-6 py-4">
                       <Link
                         href={`/admin/laporan/${item.penilaianId}/detail`}

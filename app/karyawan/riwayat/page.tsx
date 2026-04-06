@@ -1,4 +1,3 @@
-// src/app/karyawan/riwayat/page.tsx
 'use client';
 
 import Link from 'next/link';
@@ -18,12 +17,19 @@ type PeriodeDoc = {
   nama?: string;
   name?: string;
   status?: 'aktif' | 'ditutup';
+
   mulai?: any;
   selesai?: any;
+
   startDate?: any;
   endDate?: any;
+
   tanggalMulai?: any;
   tanggalSelesai?: any;
+
+  awal?: any;
+  akhir?: any;
+
   createdAt?: any;
   updatedAt?: any;
 };
@@ -32,9 +38,13 @@ type PenilaianDoc = {
   periodeId: string;
   karyawanId: string;
   status: StatusPenilaian;
+
   nilaiKaryawan?: Record<string, number>;
   nilaiAdmin?: Record<string, number>;
+
   catatanAdmin?: string;
+  totalNilai?: number;
+
   createdAt?: any;
   updatedAt?: any;
 };
@@ -59,7 +69,7 @@ type HistoryRow = {
   periodeId: string;
   periode: string;
   status: 'Dikirim' | 'Dinilai' | 'Draft';
-  nilai: string; // nilai akhir dari nilaiAdmin (0..100) kalau dinilai
+  nilai: string;
 };
 
 function mapStatusToBadge(status: StatusPenilaian): HistoryRow['status'] {
@@ -70,12 +80,20 @@ function mapStatusToBadge(status: StatusPenilaian): HistoryRow['status'] {
 
 function toDateSafe(v: any): Date | null {
   if (!v) return null;
+
   if (typeof v?.toDate === 'function') return v.toDate();
   if (v instanceof Date) return v;
+
   if (typeof v === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      const [y, m, d] = v.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+
     const d = new Date(v);
-    return isNaN(d.getTime()) ? null : d;
+    return Number.isNaN(d.getTime()) ? null : d;
   }
+
   return null;
 }
 
@@ -84,25 +102,30 @@ function getSortableTime(v: any): number {
   return d ? d.getTime() : 0;
 }
 
-function round1(n: number) {
-  return Math.round(n * 10) / 10;
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
+function formatNilai(n: number) {
+  return round2(n).toFixed(2);
 }
 
 function hitungNilaiAkhir(params: {
-  nilaiAdmin: Record<string, number> | undefined;
+  nilai: Record<string, number> | undefined;
   kriteria: Array<{ id: string; bobot: number; urutan: number }>;
 }): number {
-  const { nilaiAdmin, kriteria } = params;
-  if (!nilaiAdmin) return 0;
+  const { nilai, kriteria } = params;
+  if (!nilai) return 0;
   if (!kriteria.length) return 0;
 
   let total = 0;
-  for (const k of kriteria) {
-    const v = typeof nilaiAdmin[k.id] === 'number' ? nilaiAdmin[k.id] : 0; // 0..5
-    const bobot = typeof k.bobot === 'number' ? k.bobot : 0;
-    total += (v / 5) * 100 * (bobot / 100);
+  for (const item of kriteria) {
+    const skor = typeof nilai[item.id] === 'number' ? Number(nilai[item.id]) : 0;
+    const bobot = typeof item.bobot === 'number' ? Number(item.bobot) : 0;
+    total += ((skor / 5) * 100) * (bobot / 100);
   }
-  return round1(total);
+
+  return round2(total);
 }
 
 function mapPeriodeName(p?: PeriodeDoc | null, fallbackId?: string) {
@@ -114,6 +137,7 @@ function periodeSortMs(p?: PeriodeDoc | null) {
     getSortableTime(p?.mulai) ||
     getSortableTime(p?.startDate) ||
     getSortableTime(p?.tanggalMulai) ||
+    getSortableTime(p?.awal) ||
     getSortableTime(p?.updatedAt) ||
     getSortableTime(p?.createdAt) ||
     0
@@ -131,9 +155,8 @@ export default function RiwayatPenilaianPage() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<HistoryRow[]>([]);
 
-  // ✅ filter periode sinkron Firestore
   const [periodeOptions, setPeriodeOptions] = useState<PeriodeOption[]>([]);
-  const [selectedPeriodeId, setSelectedPeriodeId] = useState<string>(''); // '' = semua
+  const [selectedPeriodeId, setSelectedPeriodeId] = useState<string>('');
 
   const pageSize = 5;
 
@@ -149,7 +172,6 @@ export default function RiwayatPenilaianPage() {
       setLoading(true);
 
       try {
-        // 0) periode options (untuk dropdown), sort client, default aktif
         const periodeSnap = await getDocs(query(collection(db, 'periode_penilaian'), limit(500)));
         const pList: PeriodeOption[] = periodeSnap.docs
           .map((d) => {
@@ -173,7 +195,6 @@ export default function RiwayatPenilaianPage() {
           return aktif?.id ?? '';
         });
 
-        // 1) penilaian_kinerja milik karyawan (anti-index)
         const penilaianSnap = await getDocs(
           query(collection(db, 'penilaian_kinerja'), where('karyawanId', '==', karyawanId), limit(500))
         );
@@ -183,17 +204,16 @@ export default function RiwayatPenilaianPage() {
           data: d.data() as PenilaianDoc,
         }));
 
-        // map periode untuk label
         const periodeMap = new Map<string, PeriodeDoc>();
         periodeSnap.docs.forEach((d) => periodeMap.set(d.id, d.data() as PeriodeDoc));
 
-        // 2) periode dinilai => hitung nilai
         const periodeDinilaiSet = new Set<string>();
         penilaianList.forEach(({ data }) => {
-          if (data.status === 'dinilai' && data.periodeId) periodeDinilaiSet.add(data.periodeId);
+          if (data.status === 'dinilai' && data.periodeId) {
+            periodeDinilaiSet.add(data.periodeId);
+          }
         });
 
-        // 3) kriteria per periode (anti-index)
         const kriteriaCache = new Map<string, Array<{ id: string; bobot: number; urutan: number }>>();
         for (const periodeId of Array.from(periodeDinilaiSet)) {
           const kriSnap = await getDocs(
@@ -203,27 +223,35 @@ export default function RiwayatPenilaianPage() {
           const list = kriSnap.docs
             .map((d) => {
               const data = d.data() as KriteriaDoc;
-              return { id: d.id, bobot: Number(data.bobot ?? 0), urutan: Number(data.urutan ?? 0) };
+              return {
+                id: d.id,
+                bobot: Number(data.bobot ?? 0),
+                urutan: Number(data.urutan ?? 0),
+              };
             })
             .sort((a, b) => (a.urutan ?? 0) - (b.urutan ?? 0));
 
           kriteriaCache.set(periodeId, list);
         }
 
-        // 4) rows
         const merged: Array<HistoryRow & { _sortTime: number }> = penilaianList.map(({ data }) => {
           const periode = periodeMap.get(data.periodeId);
           const namaPeriode = mapPeriodeName(periode, data.periodeId);
 
           let nilaiTampil = '-';
+
           if (data.status === 'dinilai') {
-            const kriteria = kriteriaCache.get(data.periodeId) ?? [];
-            nilaiTampil = String(
-              hitungNilaiAkhir({
-                nilaiAdmin: data.nilaiAdmin ?? {},
-                kriteria,
-              })
-            );
+            if (typeof data.totalNilai === 'number' && Number.isFinite(data.totalNilai)) {
+              nilaiTampil = formatNilai(data.totalNilai);
+            } else {
+              const kriteria = kriteriaCache.get(data.periodeId) ?? [];
+              nilaiTampil = formatNilai(
+                hitungNilaiAkhir({
+                  nilai: data.nilaiAdmin ?? {},
+                  kriteria,
+                })
+              );
+            }
           }
 
           const sortTime = getSortableTime(data.updatedAt) || getSortableTime(data.createdAt) || 0;
@@ -254,12 +282,12 @@ export default function RiwayatPenilaianPage() {
     }
 
     loadRiwayat();
+
     return () => {
       mounted = false;
     };
   }, [karyawanId]);
 
-  // ✅ filter periode + search (table)
   const filteredData = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
 
@@ -280,8 +308,7 @@ export default function RiwayatPenilaianPage() {
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totalPages]);
+  }, [currentPage, totalPages]);
 
   const pageButtons = useMemo(() => {
     const maxButtons = 5;
@@ -295,7 +322,6 @@ export default function RiwayatPenilaianPage() {
         <h1 className="text-3xl font-bold text-gray-900">Riwayat Penilaian</h1>
       </div>
 
-      {/* Filter Bar */}
       <CardSection>
         <div className="flex gap-4 items-center">
           <select
@@ -330,7 +356,6 @@ export default function RiwayatPenilaianPage() {
         </div>
       </CardSection>
 
-      {/* History Table */}
       <CardSection>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -338,7 +363,7 @@ export default function RiwayatPenilaianPage() {
               <tr className="border-b border-gray-200">
                 <th className="px-6 py-3 text-left font-semibold text-gray-700 bg-gray-50">Periode</th>
                 <th className="px-6 py-3 text-left font-semibold text-gray-700 bg-gray-50">Status</th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700 bg-gray-50">Nilai Akhir (Admin)</th>
+                <th className="px-6 py-3 text-left font-semibold text-gray-700 bg-gray-50">Nilai Akhir</th>
                 <th className="px-6 py-3 text-left font-semibold text-gray-700 bg-gray-50">Aksi</th>
               </tr>
             </thead>
@@ -378,7 +403,6 @@ export default function RiwayatPenilaianPage() {
           </table>
         </div>
 
-        {/* Pagination */}
         <div className="flex items-center justify-center gap-2 mt-6">
           <button
             className="p-2 hover:bg-gray-100 rounded-lg transition"

@@ -1,4 +1,3 @@
-// src/app/admin/laporan/[id]/detail/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -18,10 +17,42 @@ import {
   type PeriodePenilaian,
   type KriteriaPenilaian,
 } from '@/lib/firebase/adminLaporanService';
+import { useAuth } from '@/context/AuthContext';
+
+function toNumberSafe(v: any) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function format2(n: number) {
+  return (Math.round(n * 100) / 100).toFixed(2);
+}
+
+function getTanggalMulai(periode: Partial<PeriodePenilaian> | null | undefined) {
+  return (
+    periode?.mulai ??
+    periode?.startDate ??
+    periode?.tanggalMulai ??
+    periode?.awal ??
+    null
+  );
+}
+
+function getTanggalSelesai(periode: Partial<PeriodePenilaian> | null | undefined) {
+  return (
+    periode?.selesai ??
+    periode?.endDate ??
+    periode?.tanggalSelesai ??
+    periode?.akhir ??
+    null
+  );
+}
 
 export default function LaporanDetailPage() {
   const params = useParams();
   const penilaianId = String(params?.id ?? '');
+
+  const { user, isLoading: authLoading } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +73,18 @@ export default function LaporanDetailPage() {
       setError(null);
 
       try {
+        if (!penilaianId) {
+          throw new Error('Parameter laporan tidak valid.');
+        }
+
+        if (!user) {
+          throw new Error('Silakan login terlebih dahulu.');
+        }
+
+        if (user.role !== 'admin') {
+          throw new Error('Akses ditolak. Halaman ini hanya untuk admin.');
+        }
+
         const p = await getPenilaianByDocId(penilaianId);
         if (!p) throw new Error('Data penilaian tidak ditemukan.');
 
@@ -60,14 +103,18 @@ export default function LaporanDetailPage() {
         try {
           const sum = await getAttendanceSummary({
             karyawanId: p.karyawanId,
-            mulai: per.mulai,
-            selesai: per.selesai,
+            mulai: getTanggalMulai(per),
+            selesai: getTanggalSelesai(per),
           });
+
           if (!mounted) return;
           setHadirHari(sum.hadirHari);
           setHadirPersen(sum.hadirPersen);
         } catch (e: any) {
           console.warn('Attendance query warning:', e?.message);
+          if (!mounted) return;
+          setHadirHari(0);
+          setHadirPersen(0);
         }
 
         setLoading(false);
@@ -78,30 +125,63 @@ export default function LaporanDetailPage() {
       }
     }
 
+    if (authLoading) return;
+
     load();
+
     return () => {
       mounted = false;
     };
-  }, [penilaianId]);
+  }, [authLoading, user, penilaianId]);
 
-  const totalNilai = useMemo(() => {
+  const totalNilaiAkhir = useMemo(() => {
     if (!penilaian) return 0;
-    return hitungNilaiAkhir({ nilai: penilaian.nilaiAdmin, kriteria });
+
+    if (typeof penilaian.totalNilai === 'number') {
+      return toNumberSafe(penilaian.totalNilai);
+    }
+
+    return hitungNilaiAkhir({
+      nilai: penilaian.nilaiAdmin,
+      kriteria,
+    });
+  }, [penilaian, kriteria]);
+
+  const totalNilaiKaryawan = useMemo(() => {
+    if (!penilaian) return 0;
+
+    return hitungNilaiAkhir({
+      nilai: penilaian.nilaiKaryawan,
+      kriteria,
+    });
   }, [penilaian, kriteria]);
 
   const criteriaRows = useMemo(() => {
     return kriteria.map((kr) => {
-      const nilai = penilaian?.nilaiAdmin?.[kr.id];
+      const nilaiKaryawan = penilaian?.nilaiKaryawan?.[kr.id];
+      const nilaiAdmin = penilaian?.nilaiAdmin?.[kr.id];
+
       return {
         id: kr.id,
         name: kr.namaKriteria,
         weight: `${kr.bobot}%`,
-        nilai: typeof nilai === 'number' ? String(nilai) : '0',
+        nilaiKaryawan: typeof nilaiKaryawan === 'number' ? nilaiKaryawan : null,
+        nilaiAdmin: typeof nilaiAdmin === 'number' ? nilaiAdmin : null,
       };
     });
   }, [kriteria, penilaian]);
 
-  if (loading) {
+  const catatanKaryawanText =
+    penilaian?.catatanKaryawan && String(penilaian.catatanKaryawan).trim()
+      ? String(penilaian.catatanKaryawan)
+      : 'Tidak ada catatan dari karyawan.';
+
+  const catatanAdminText =
+    penilaian?.catatanAdmin && String(penilaian.catatanAdmin).trim()
+      ? String(penilaian.catatanAdmin)
+      : 'Belum ada catatan dari admin.';
+
+  if (authLoading || loading) {
     return (
       <div className="space-y-6 ml-80 mt-28">
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 text-sm">
@@ -126,7 +206,6 @@ export default function LaporanDetailPage() {
 
   return (
     <div className="space-y-6 ml-80 mt-28">
-      {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-blue-700 font-medium">
         <Link href="/admin/laporan" className="hover:text-blue-900">
           Laporan
@@ -135,20 +214,17 @@ export default function LaporanDetailPage() {
         <span>Detail</span>
       </div>
 
-      {/* Page Title */}
       <div>
         <h1 className="text-4xl font-bold text-blue-900">Detail Laporan Kinerja</h1>
       </div>
 
-      {/* Profile Card with Score */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
         <div className="flex gap-8">
-          {/* Photo */}
           <div className="flex-shrink-0">
             <div className="w-40 h-44 bg-gray-200 rounded-lg overflow-hidden border border-gray-300">
               <Image
                 src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Desktop%20-%205-pdNnY1TEg5DVN9QP6i8QE6w2hXd86R.png"
-                alt="Employee"
+                alt={karyawan?.nama ?? 'Karyawan'}
                 width={160}
                 height={176}
                 className="w-full h-full object-cover"
@@ -158,14 +234,14 @@ export default function LaporanDetailPage() {
             </div>
           </div>
 
-          {/* Employee Info */}
           <div className="flex-1 space-y-6">
             <div>
-              <h2 className="text-2xl font-bold text-blue-900">{karyawan?.nama ?? penilaian.karyawanId}</h2>
+              <h2 className="text-2xl font-bold text-blue-900">
+                {karyawan?.nama ?? penilaian.karyawanId}
+              </h2>
               <p className="text-blue-600 font-medium">{karyawan?.jabatan ?? '-'}</p>
             </div>
 
-            {/* Employee Details */}
             <div className="space-y-3">
               <div className="flex items-center">
                 <span className="text-blue-700 font-medium w-32">NIP</span>
@@ -182,19 +258,23 @@ export default function LaporanDetailPage() {
                 <span className="text-gray-500 mx-2">:</span>
                 <span className="text-gray-700">{periode.namaPeriode}</span>
               </div>
+              <div className="flex items-center">
+                <span className="text-blue-700 font-medium w-32">Status</span>
+                <span className="text-gray-500 mx-2">:</span>
+                <span className="text-gray-700">{penilaian.status}</span>
+              </div>
             </div>
           </div>
 
-          {/* Score Card */}
           <div className="bg-blue-50 rounded-lg p-6 w-72 flex flex-col gap-6 border border-blue-100">
             <div className="flex items-center gap-3">
               <div className="text-2xl">📊</div>
               <div>
-                <p className="text-sm text-gray-600">Rata-Rata</p>
+                <p className="text-sm text-gray-600">Total</p>
                 <p className="text-sm text-gray-600">Nilai Akhir</p>
               </div>
             </div>
-            <div className="text-4xl font-bold text-blue-900">{totalNilai}</div>
+            <div className="text-4xl font-bold text-blue-900">{format2(totalNilaiAkhir)}</div>
             <div className="border-t border-blue-200 pt-4">
               <p className="text-sm text-gray-700 mb-2">Hadir : {hadirHari} Hari</p>
               <p className="text-2xl font-bold text-green-700">{hadirPersen}%</p>
@@ -203,7 +283,40 @@ export default function LaporanDetailPage() {
         </div>
       </div>
 
-      {/* Hasil Penilaian Kriteria */}
+      <div className="grid grid-cols-2 gap-6">
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-blue-900">Ringkasan Karyawan</h3>
+            <span className="text-xs px-3 py-1 rounded-full bg-blue-50 text-blue-800 border border-blue-100">
+              Nilai Karyawan
+            </span>
+          </div>
+
+          <p className="text-sm text-gray-600">Total Nilai Karyawan</p>
+          <p className="text-4xl font-bold text-blue-900 mt-1">{format2(totalNilaiKaryawan)}</p>
+
+          <div className="mt-4">
+            <p className="text-sm font-semibold text-blue-900 mb-2">Catatan Karyawan</p>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 min-h-[120px]">
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{catatanKaryawanText}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-blue-900">Catatan Admin</h3>
+            <span className="text-xs px-3 py-1 rounded-full bg-gray-50 text-gray-700 border border-gray-200">
+              Read-only
+            </span>
+          </div>
+
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 min-h-[180px]">
+            <p className="text-sm text-gray-700 whitespace-pre-wrap">{catatanAdminText}</p>
+          </div>
+        </div>
+      </div>
+
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
         <div className="border-b border-gray-300 pb-4 mb-6">
           <h3 className="text-lg font-semibold text-blue-900">Hasil Penilaian Kriteria</h3>
@@ -216,6 +329,7 @@ export default function LaporanDetailPage() {
                 <th className="px-6 py-3 text-left font-semibold text-blue-900">Kriteria Penilaian</th>
                 <th className="px-6 py-3 text-left font-semibold text-blue-900">Bobot</th>
                 <th className="px-6 py-3 text-center font-semibold text-blue-900">Nilai Karyawan</th>
+                <th className="px-6 py-3 text-center font-semibold text-blue-900">Nilai Admin</th>
               </tr>
             </thead>
             <tbody>
@@ -223,13 +337,18 @@ export default function LaporanDetailPage() {
                 <tr key={item.id} className="border-b border-gray-200 hover:bg-gray-50">
                   <td className="px-6 py-4 text-blue-700 font-medium">{item.name}</td>
                   <td className="px-6 py-4 text-gray-700">{item.weight}</td>
-                  <td className="px-6 py-4 text-center text-gray-700">{item.nilai}</td>
+                  <td className="px-6 py-4 text-center text-gray-700">
+                    {item.nilaiKaryawan === null ? '-' : item.nilaiKaryawan}
+                  </td>
+                  <td className="px-6 py-4 text-center text-gray-700">
+                    {item.nilaiAdmin === null ? '-' : item.nilaiAdmin}
+                  </td>
                 </tr>
               ))}
 
               {criteriaRows.length === 0 && (
                 <tr>
-                  <td className="px-6 py-6 text-gray-500" colSpan={3}>
+                  <td className="px-6 py-6 text-gray-500" colSpan={4}>
                     Kriteria untuk periode ini belum dibuat.
                   </td>
                 </tr>
@@ -238,24 +357,14 @@ export default function LaporanDetailPage() {
           </table>
         </div>
 
-        {/* Catatan Admin */}
-        <div className="mt-6 pt-6 border-t border-gray-200 space-y-3">
-          <h4 className="font-semibold text-blue-900">Catatan Admin</h4>
-          <p className="text-gray-700 text-sm leading-relaxed">
-            {penilaian.catatanAdmin ? penilaian.catatanAdmin : '-'}
-          </p>
-        </div>
-
-        {/* Total Nilai */}
         <div className="mt-6 pt-6 bg-blue-50 rounded-lg p-6 flex justify-center">
           <div className="text-center">
-            <p className="text-blue-700 font-medium mb-2">Total Nilai :</p>
-            <p className="text-4xl font-bold text-blue-900">{totalNilai}</p>
+            <p className="text-blue-700 font-medium mb-2">Total Nilai Akhir :</p>
+            <p className="text-4xl font-bold text-blue-900">{format2(totalNilaiAkhir)}</p>
           </div>
         </div>
       </div>
 
-      {/* Back Button */}
       <div className="flex justify-end">
         <Link
           href="/admin/laporan"

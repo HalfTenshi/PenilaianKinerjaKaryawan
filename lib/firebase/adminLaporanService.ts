@@ -24,8 +24,17 @@ export type PeriodePenilaian = {
   id: string;
   namaPeriode: string;
   status: StatusPeriode;
-  mulai: any;
-  selesai: any;
+
+  mulai?: any;
+  startDate?: any;
+  tanggalMulai?: any;
+  awal?: any;
+
+  selesai?: any;
+  endDate?: any;
+  tanggalSelesai?: any;
+  akhir?: any;
+
   createdAt?: any;
   updatedAt?: any;
 };
@@ -48,19 +57,22 @@ export type Karyawan = {
   jabatan: string;
   statusAktif: boolean;
   createdAt?: any;
+  updatedAt?: any;
 };
 
 export type PenilaianKinerja = {
   id: string;
   karyawanId: string;
   periodeId: string;
+
   nilaiKaryawan: Record<string, number>;
   catatanKaryawan?: string;
+
   nilaiAdmin: Record<string, number>;
-  catatanAdmin: string;
+  catatanAdmin?: string;
+
   totalNilai?: number;
-  totalNilaiKaryawan?: number;
-  totalNilaiAdmin?: number;
+
   status: StatusPenilaian;
   createdAt?: any;
   updatedAt?: any;
@@ -79,7 +91,9 @@ export type Attendance = {
 
 function assertDb() {
   const db = getFirebaseDb();
-  if (!db) throw new Error('Firebase belum diinisialisasi (db null).');
+  if (!db) {
+    throw new Error('Firebase belum diinisialisasi (db null).');
+  }
   return db;
 }
 
@@ -91,48 +105,76 @@ function startOfDay(d: Date): Date {
   return startOfDayUtil(d);
 }
 
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
 function toMsAny(v: any): number {
-  if (!v) return 0;
-  if (typeof v?.toDate === 'function') return v.toDate().getTime();
-  if (v instanceof Date) return v.getTime();
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  if (typeof v === 'string') {
-    const d = new Date(v);
-    const ms = d.getTime();
-    return Number.isFinite(ms) ? ms : 0;
-  }
-  return 0;
+  const d = toDateSafe(v);
+  return d ? d.getTime() : 0;
 }
 
 function clampScore(value: unknown): number {
   const n = Number(value);
   if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(5, n));
+  if (n < 0) return 0;
+  if (n > 5) return 5;
+  return n;
 }
 
 function normalizeNilaiMap(raw?: Record<string, number>): Record<string, number> {
-  return Object.fromEntries(
-    Object.entries(raw ?? {}).map(([key, value]) => [key, clampScore(value)])
+  const result: Record<string, number> = {};
+
+  if (!raw || typeof raw !== 'object') return result;
+
+  for (const [key, value] of Object.entries(raw)) {
+    result[key] = clampScore(value);
+  }
+
+  return result;
+}
+
+function getTanggalMulaiRaw(data: any) {
+  return (
+    data?.mulai ??
+    data?.startDate ??
+    data?.tanggalMulai ??
+    data?.tanggalAwal ??
+    data?.awal ??
+    null
+  );
+}
+
+function getTanggalSelesaiRaw(data: any) {
+  return (
+    data?.selesai ??
+    data?.endDate ??
+    data?.tanggalSelesai ??
+    data?.tanggalAkhir ??
+    data?.akhir ??
+    null
   );
 }
 
 function mapPeriodeDoc(id: string, data: any): PeriodePenilaian {
+  const mulai = getTanggalMulaiRaw(data);
+  const selesai = getTanggalSelesaiRaw(data);
+
   return {
     id,
     namaPeriode: String(data?.namaPeriode ?? data?.nama ?? data?.name ?? '-'),
     status: data?.status === 'aktif' ? 'aktif' : 'ditutup',
-    mulai:
-      data?.mulai ??
-      data?.startDate ??
-      data?.tanggalMulai ??
-      data?.tanggalAwal ??
-      data?.awal,
-    selesai:
-      data?.selesai ??
-      data?.endDate ??
-      data?.tanggalSelesai ??
-      data?.tanggalAkhir ??
-      data?.akhir,
+
+    mulai,
+    startDate: data?.startDate,
+    tanggalMulai: data?.tanggalMulai,
+    awal: data?.awal,
+
+    selesai,
+    endDate: data?.endDate,
+    tanggalSelesai: data?.tanggalSelesai,
+    akhir: data?.akhir,
+
     createdAt: data?.createdAt,
     updatedAt: data?.updatedAt,
   };
@@ -159,10 +201,18 @@ function mapKaryawanDoc(id: string, data: any): Karyawan {
     jabatan: String(data?.jabatan ?? '-'),
     statusAktif: Boolean(data?.statusAktif ?? true),
     createdAt: data?.createdAt,
+    updatedAt: data?.updatedAt,
   };
 }
 
 function mapPenilaianDoc(id: string, data: any): PenilaianKinerja {
+  const totalNilaiFinal =
+    data?.totalNilai !== undefined && data?.totalNilai !== null
+      ? Number(data.totalNilai)
+      : data?.totalNilaiAdmin !== undefined && data?.totalNilaiAdmin !== null
+      ? Number(data.totalNilaiAdmin)
+      : undefined;
+
   return {
     id: String(data?.id ?? id),
     karyawanId: String(data?.karyawanId ?? ''),
@@ -171,18 +221,7 @@ function mapPenilaianDoc(id: string, data: any): PenilaianKinerja {
     catatanKaryawan: String(data?.catatanKaryawan ?? ''),
     nilaiAdmin: normalizeNilaiMap(data?.nilaiAdmin),
     catatanAdmin: String(data?.catatanAdmin ?? ''),
-    totalNilai:
-      data?.totalNilai !== undefined && data?.totalNilai !== null
-        ? Number(data.totalNilai)
-        : undefined,
-    totalNilaiKaryawan:
-      data?.totalNilaiKaryawan !== undefined && data?.totalNilaiKaryawan !== null
-        ? Number(data.totalNilaiKaryawan)
-        : undefined,
-    totalNilaiAdmin:
-      data?.totalNilaiAdmin !== undefined && data?.totalNilaiAdmin !== null
-        ? Number(data.totalNilaiAdmin)
-        : undefined,
+    totalNilai: Number.isFinite(totalNilaiFinal) ? totalNilaiFinal : undefined,
     status:
       data?.status === 'dikirim' || data?.status === 'dinilai'
         ? data.status
@@ -248,6 +287,7 @@ export async function getPeriodeById(
   const db = assertDb();
   const ref = doc(db, COLLECTIONS.PERIODE_PENILAIAN, periodeId);
   const snap = await getDoc(ref);
+
   if (!snap.exists()) return null;
 
   return mapPeriodeDoc(snap.id, snap.data());
@@ -259,6 +299,7 @@ export async function getKaryawanById(
   const db = assertDb();
   const ref = doc(db, COLLECTIONS.KARYAWAN, karyawanId);
   const snap = await getDoc(ref);
+
   if (!snap.exists()) return null;
 
   return mapKaryawanDoc(snap.id, snap.data());
@@ -339,6 +380,11 @@ export async function getKriteriaByPeriode(
   return list;
 }
 
+/**
+ * Rumus final wajib:
+ * total = Σ ( (nilai/5) * 100 * (bobot/100) )
+ * return 2 desimal
+ */
 export function hitungNilaiAkhir(params: {
   nilai: Record<string, number> | undefined;
   kriteria: KriteriaPenilaian[];
@@ -350,12 +396,12 @@ export function hitungNilaiAkhir(params: {
   let total = 0;
 
   for (const k of kriteria) {
-    const v = clampScore(nilai[k.id]);
+    const skor = clampScore(nilai[k.id]);
     const bobot = Number(k.bobot ?? 0);
-    total += (v / 5) * bobot;
+    total += ((skor / 5) * 100) * (bobot / 100);
   }
 
-  return Math.round(total * 100) / 100;
+  return round2(total);
 }
 
 /**
@@ -453,7 +499,7 @@ export async function getAttendanceSummary(params: {
   const uniqueByTanggal = new Map<string, AttendanceStatus>();
 
   snap.forEach((docu) => {
-    const data = docu.data() as any as Attendance;
+    const data = docu.data() as Attendance;
 
     const tgl = toDateSafe(data.tanggal);
     if (!tgl) return;
@@ -466,11 +512,11 @@ export async function getAttendanceSummary(params: {
       t.getDate()
     ).padStart(2, '0')}`;
 
-    const st = (data.statusKehadiran ?? data.status) as
-      | AttendanceStatus
-      | undefined;
+    const st = data.statusKehadiran ?? data.status;
 
-    if (!st) return;
+    if (st !== 'hadir' && st !== 'sakit' && st !== 'izin') {
+      return;
+    }
 
     uniqueByTanggal.set(key, st);
   });
@@ -510,6 +556,7 @@ export async function getPenilaianByDocId(
   const db = assertDb();
   const ref = doc(db, COLLECTIONS.PENILAIAN_KINERJA, docId);
   const snap = await getDoc(ref);
+
   if (!snap.exists()) return null;
 
   return mapPenilaianDoc(snap.id, snap.data());
