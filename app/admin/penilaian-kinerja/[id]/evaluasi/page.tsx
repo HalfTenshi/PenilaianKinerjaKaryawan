@@ -201,6 +201,11 @@ export default function EvaluasiPage() {
       ? String(penilaian.catatanKaryawan)
       : 'Tidak ada catatan dari karyawan.';
 
+  const jabatanTampil =
+    karyawan?.jabatan && String(karyawan.jabatan).trim() !== '-'
+      ? String(karyawan.jabatan).trim()
+      : '';
+
   return (
     <div className="space-y-6 ml-80 mt-28">
       <div className="flex items-center gap-2 text-sm text-blue-700 font-medium">
@@ -220,11 +225,11 @@ export default function EvaluasiPage() {
           <div className="flex-shrink-0">
             <div className="w-40 h-44 bg-gray-200 rounded-lg overflow-hidden border border-gray-300">
               <Image
-                src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Desktop%20-%205-pdNnY1TEg5DVN9QP6i8QE6w2hXd86R.png"
+                src="/images/default-profile.png"
                 alt={karyawan?.nama ?? 'Karyawan'}
                 width={160}
                 height={176}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain"
                 loading="eager"
                 priority
               />
@@ -234,7 +239,9 @@ export default function EvaluasiPage() {
           <div className="flex-1 space-y-6">
             <div>
               <h2 className="text-2xl font-bold text-blue-900">{karyawan?.nama ?? penilaian.karyawanId}</h2>
-              <p className="text-blue-600 font-medium">{karyawan?.jabatan ?? '-'}</p>
+              {jabatanTampil !== '' && (
+                <p className="text-blue-600 font-medium">{jabatanTampil}</p>
+              )}
             </div>
 
             <div className="space-y-3">

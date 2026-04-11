@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, User } from 'lucide-react';
 import Image from 'next/image';
 import { useParams } from 'next/navigation';
 
@@ -209,9 +209,12 @@ export default function DetailPenilaianKaryawanPage() {
     );
   }
 
-  const foto = (user as any)?.fotoProfilUrl
-    ? String((user as any).fotoProfilUrl)
-    : 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Desktop%20-%205-pdNnY1TEg5DVN9QP6i8QE6w2hXd86R.png';
+  const foto =
+  (user as any)?.fotoProfilUrl || "/images/default-profile.png";
+  const jabatanTampil =
+    karyawan?.jabatan && String(karyawan.jabatan).trim() !== '-'
+      ? String(karyawan.jabatan).trim()
+      : '';
 
   return (
     <div className="space-y-6">
@@ -231,16 +234,15 @@ export default function DetailPenilaianKaryawanPage() {
         <div className="flex gap-8">
           <div className="flex-shrink-0">
             <div className="w-40 h-44 bg-gray-200 rounded-lg overflow-hidden border border-gray-300">
-              <Image
-                src={foto}
-                alt={karyawan?.nama ?? 'Karyawan'}
-                width={160}
-                height={176}
-                className="w-full h-full object-cover"
-                loading="eager"
-                priority
-              />
-            </div>
+  <Image
+    src={foto}
+    alt={karyawan?.nama ?? "Karyawan"}
+    width={160}
+    height={176}
+    className="w-full h-full object-contain"
+    priority
+  />
+</div>
           </div>
 
           <div className="flex-1 space-y-6">
@@ -248,7 +250,9 @@ export default function DetailPenilaianKaryawanPage() {
               <h2 className="text-2xl font-bold text-blue-900">
                 {karyawan?.nama ?? penilaian.karyawanId}
               </h2>
-              <p className="text-blue-600 font-medium">{karyawan?.jabatan ?? '-'}</p>
+              {jabatanTampil !== '' && (
+                <p className="text-blue-600 font-medium">{jabatanTampil}</p>
+              )}
             </div>
 
             <div className="space-y-3">
