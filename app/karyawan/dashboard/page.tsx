@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   collection,
   doc,
@@ -11,26 +11,26 @@ import {
   where,
   setDoc,
   serverTimestamp,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { useAuth } from '@/context/AuthContext';
+} from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { useAuth } from "@/context/AuthContext";
 
-import { CardSection } from '@/components/CardSection';
-import { StatusBadge } from '@/components/StatusBadge';
-import { CheckCircle, AlertCircle, ListChecks } from 'lucide-react';
+import { CardSection } from "@/components/CardSection";
+import { StatusBadge } from "@/components/StatusBadge";
+import { CheckCircle, AlertCircle, ListChecks } from "lucide-react";
 
 type ActivePeriode = {
   id: string;
   namaPeriode?: string;
-  status?: 'aktif' | 'ditutup';
+  status?: "aktif" | "ditutup";
   mulai?: any;
   selesai?: any;
   createdAt?: any;
   updatedAt?: any;
 };
 
-type AttendanceStatus = 'hadir' | 'sakit' | 'izin';
-type PenilaianStatus = 'draft' | 'dikirim' | 'dinilai';
+type AttendanceStatus = "hadir" | "sakit" | "izin";
+type PenilaianStatus = "draft" | "dikirim" | "dinilai";
 
 function getMonthRange(year: number, month1to12: number) {
   const start = new Date(year, month1to12 - 1, 1);
@@ -41,11 +41,11 @@ function getMonthRange(year: number, month1to12: number) {
 function toDateSafe(v: any): Date | null {
   if (!v) return null;
 
-  if (typeof v?.toDate === 'function') return v.toDate();
+  if (typeof v?.toDate === "function") return v.toDate();
   if (v instanceof Date) return v;
 
-  if (typeof v === 'string') {
-    const [yy, mm, dd] = v.split('-').map((x) => parseInt(x, 10));
+  if (typeof v === "string") {
+    const [yy, mm, dd] = v.split("-").map((x) => parseInt(x, 10));
     if (!yy || !mm || !dd) {
       const parsed = new Date(v);
       return Number.isNaN(parsed.getTime()) ? null : parsed;
@@ -66,8 +66,8 @@ function startOfDay(d: Date) {
 
 function formatDateKey(date: Date) {
   const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
 
@@ -75,12 +75,34 @@ function normalizePeriode(id: string, raw: any): ActivePeriode {
   return {
     id,
     namaPeriode: raw?.namaPeriode ?? raw?.nama ?? raw?.name,
-    status: raw?.status ?? 'aktif',
+    status: raw?.status ?? "aktif",
     mulai: raw?.mulai ?? raw?.startDate ?? raw?.tanggalMulai ?? raw?.awal,
     selesai: raw?.selesai ?? raw?.endDate ?? raw?.tanggalSelesai ?? raw?.akhir,
     createdAt: raw?.createdAt,
     updatedAt: raw?.updatedAt,
   };
+}
+
+function StatItem({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 shrink-0 text-blue-600">{icon}</div>
+        <div className="min-w-0">
+          <p className="text-sm text-gray-600">{label}</p>
+          <p className="text-xl font-bold text-gray-900">{value}</p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function DashboardPage() {
@@ -89,13 +111,13 @@ export default function DashboardPage() {
 
   const [loading, setLoading] = useState(true);
   const [submittingAttendance, setSubmittingAttendance] = useState(false);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState("");
 
   const [activePeriod, setActivePeriod] = useState<ActivePeriode | null>(null);
   const [criteriaCount, setCriteriaCount] = useState(0);
   const [filledCount, setFilledCount] = useState(0);
   const [penilaianStatus, setPenilaianStatus] =
-    useState<PenilaianStatus>('draft');
+    useState<PenilaianStatus>("draft");
 
   const [attendancePercent, setAttendancePercent] = useState(0);
   const [hadirHari, setHadirHari] = useState(0);
@@ -104,7 +126,7 @@ export default function DashboardPage() {
   const [alphaHari, setAlphaHari] = useState(0);
 
   const [attendanceStatus, setAttendanceStatus] =
-    useState<AttendanceStatus>('hadir');
+    useState<AttendanceStatus>("hadir");
 
   const today = useMemo(() => new Date(), []);
   const todayString = useMemo(() => formatDateKey(today), [today]);
@@ -114,11 +136,14 @@ export default function DashboardPage() {
 
     async function loadData() {
       setLoading(true);
-      setMessage('');
+      setMessage("");
 
       try {
         const periodeSnap = await getDocs(
-          query(collection(db, 'periode_penilaian'), where('status', '==', 'aktif'))
+          query(
+            collection(db, "periode_penilaian"),
+            where("status", "==", "aktif")
+          )
         );
 
         const activeList = periodeSnap.docs
@@ -138,8 +163,8 @@ export default function DashboardPage() {
         if (periode?.id) {
           const kriteriaSnap = await getDocs(
             query(
-              collection(db, 'kriteria_penilaian'),
-              where('periodeId', '==', periode.id)
+              collection(db, "kriteria_penilaian"),
+              where("periodeId", "==", periode.id)
             )
           );
           setCriteriaCount(kriteriaSnap.size);
@@ -149,7 +174,7 @@ export default function DashboardPage() {
 
         if (periode?.id) {
           const penilaianId = `${karyawanId}_${periode.id}`;
-          const penilaianRef = doc(db, 'penilaian_kinerja', penilaianId);
+          const penilaianRef = doc(db, "penilaian_kinerja", penilaianId);
           const snapPenilaian = await getDoc(penilaianRef);
 
           if (snapPenilaian.exists()) {
@@ -157,23 +182,23 @@ export default function DashboardPage() {
 
             const nilaiKaryawan = data?.nilaiKaryawan ?? {};
             const filled =
-              nilaiKaryawan && typeof nilaiKaryawan === 'object'
+              nilaiKaryawan && typeof nilaiKaryawan === "object"
                 ? Object.keys(nilaiKaryawan).length
                 : 0;
 
             setFilledCount(filled);
             setPenilaianStatus(
-              data?.status === 'dikirim' || data?.status === 'dinilai'
+              data?.status === "dikirim" || data?.status === "dinilai"
                 ? data.status
-                : 'draft'
+                : "draft"
             );
           } else {
             setFilledCount(0);
-            setPenilaianStatus('draft');
+            setPenilaianStatus("draft");
           }
         } else {
           setFilledCount(0);
-          setPenilaianStatus('draft');
+          setPenilaianStatus("draft");
         }
 
         await refreshAttendanceSummary(karyawanId, periode);
@@ -182,13 +207,13 @@ export default function DashboardPage() {
         setActivePeriod(null);
         setCriteriaCount(0);
         setFilledCount(0);
-        setPenilaianStatus('draft');
+        setPenilaianStatus("draft");
         setAttendancePercent(0);
         setHadirHari(0);
         setSakitHari(0);
         setIzinHari(0);
         setAlphaHari(0);
-        setMessage('Gagal memuat dashboard karyawan.');
+        setMessage("Gagal memuat dashboard karyawan.");
       } finally {
         setLoading(false);
       }
@@ -229,7 +254,7 @@ export default function DashboardPage() {
     }
 
     const snap = await getDocs(
-      query(collection(db, 'absensi'), where('karyawanId', '==', karyawanIdArg))
+      query(collection(db, "absensi"), where("karyawanId", "==", karyawanIdArg))
     );
 
     const uniqueByDate = new Map<string, AttendanceStatus>();
@@ -259,9 +284,9 @@ export default function DashboardPage() {
     let izin = 0;
 
     uniqueByDate.forEach((st) => {
-      if (st === 'hadir') hadir += 1;
-      else if (st === 'sakit') sakit += 1;
-      else if (st === 'izin') izin += 1;
+      if (st === "hadir") hadir += 1;
+      else if (st === "sakit") sakit += 1;
+      else if (st === "izin") izin += 1;
     });
 
     const alpha = Math.max(totalHariKerja - (hadir + sakit + izin), 0);
@@ -279,11 +304,11 @@ export default function DashboardPage() {
     if (!karyawanId) return;
 
     setSubmittingAttendance(true);
-    setMessage('');
+    setMessage("");
 
     try {
       const absensiId = `${karyawanId}_${todayString}`;
-      const absensiRef = doc(db, 'absensi', absensiId);
+      const absensiRef = doc(db, "absensi", absensiId);
       const existingSnap = await getDoc(absensiRef);
 
       await setDoc(
@@ -299,145 +324,143 @@ export default function DashboardPage() {
         { merge: true }
       );
 
-      setMessage('Absensi berhasil disimpan.');
+      setMessage("Absensi berhasil disimpan.");
       await refreshAttendanceSummary(karyawanId, activePeriod);
     } catch (error) {
       console.error(error);
-      setMessage('Gagal menyimpan absensi.');
+      setMessage("Gagal menyimpan absensi.");
     } finally {
       setSubmittingAttendance(false);
     }
   };
 
   const belumDiisi = Math.max(criteriaCount - filledCount, 0);
-  const ctaText = penilaianStatus === 'draft' ? 'Lanjutkan penilaian' : 'Lihat penilaian';
+  const ctaText =
+    penilaianStatus === "draft" ? "Lanjutkan penilaian" : "Lihat penilaian";
   const attendanceLabel = activePeriod
-    ? 'Kehadiran periode aktif (hari kerja)'
-    : 'Kehadiran bulan ini (hari kerja)';
+    ? "Kehadiran periode aktif (hari kerja)"
+    : "Kehadiran bulan ini (hari kerja)";
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-      </div>
-
       <CardSection title="Periode aktif">
         {activePeriod ? (
           <div className="space-y-4">
             <div>
-              <p className="text-2xl font-bold text-gray-900">
-                {activePeriod.namaPeriode ?? 'Periode Aktif'}
+              <p className="text-xl font-bold text-gray-900 md:text-2xl">
+                {activePeriod.namaPeriode ?? "Periode Aktif"}
               </p>
-              <p className="mt-1 text-sm text-gray-600">
-                Status penilaian : <StatusBadge status={penilaianStatus as any} />
-              </p>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <p className="text-sm text-gray-600">Status penilaian</p>
+                <div>
+                  <StatusBadge status={penilaianStatus as any} />
+                </div>
+              </div>
             </div>
 
-            <Link
-              href="/karyawan/isi-penilaian"
-              className="inline-block rounded-lg bg-blue-600 px-6 py-2 font-medium text-white transition hover:bg-blue-700"
-            >
-              {ctaText}
-            </Link>
+            <div>
+              <Link
+                href="/karyawan/isi-penilaian"
+                className="inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 font-medium text-white transition hover:bg-blue-700 sm:w-auto sm:px-6"
+              >
+                {ctaText}
+              </Link>
+            </div>
           </div>
         ) : (
           <p className="text-gray-500">Tidak ada periode aktif</p>
         )}
       </CardSection>
 
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <CardSection title="Ringkasan Penilaian">
-          <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <ListChecks className="text-blue-600" size={20} />
-              <div>
-                <p className="text-sm text-gray-600">Jumlah Kriteria</p>
-                <p className="text-xl font-bold text-gray-900">
-                  {loading ? '...' : criteriaCount}
-                </p>
-              </div>
-            </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+            <StatItem
+              icon={<ListChecks size={20} />}
+              label="Jumlah Kriteria"
+              value={loading ? "..." : criteriaCount}
+            />
 
-            <div className="flex items-center gap-3">
-              <CheckCircle className="text-green-600" size={20} />
-              <div>
-                <p className="text-sm text-gray-600">Sudah diisi</p>
-                <p className="text-xl font-bold text-gray-900">
-                  {loading ? '...' : filledCount}
-                </p>
-              </div>
-            </div>
+            <StatItem
+              icon={<CheckCircle size={20} />}
+              label="Sudah diisi"
+              value={loading ? "..." : filledCount}
+            />
 
-            <div className="flex items-center gap-3">
-              <AlertCircle className="text-yellow-600" size={20} />
-              <div>
-                <p className="text-sm text-gray-600">Belum diisi</p>
-                <p className="text-xl font-bold text-gray-900">
-                  {loading ? '...' : belumDiisi}
-                </p>
-              </div>
-            </div>
+            <StatItem
+              icon={<AlertCircle size={20} />}
+              label="Belum diisi"
+              value={loading ? "..." : belumDiisi}
+            />
           </div>
         </CardSection>
 
         <CardSection title="Absensi">
-          <div className="space-y-4">
-            <div>
+          <div className="space-y-5">
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
               <p className="text-sm text-gray-600">Tanggal</p>
-              <p className="text-lg font-semibold text-gray-900">{todayString}</p>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-gray-700">Status Kehadiran</p>
-
-              <label className="flex items-center gap-3">
-                <input
-                  type="radio"
-                  value="hadir"
-                  checked={attendanceStatus === 'hadir'}
-                  onChange={() => setAttendanceStatus('hadir')}
-                />
-                Hadir
-              </label>
-
-              <label className="flex items-center gap-3">
-                <input
-                  type="radio"
-                  value="sakit"
-                  checked={attendanceStatus === 'sakit'}
-                  onChange={() => setAttendanceStatus('sakit')}
-                />
-                Sakit
-              </label>
-
-              <label className="flex items-center gap-3">
-                <input
-                  type="radio"
-                  value="izin"
-                  checked={attendanceStatus === 'izin'}
-                  onChange={() => setAttendanceStatus('izin')}
-                />
-                Izin
-              </label>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium">{attendanceLabel}</p>
-              <p className="text-lg font-bold text-green-600">
-                {loading ? '...' : `${attendancePercent}%`}
+              <p className="text-lg font-semibold text-gray-900">
+                {todayString}
               </p>
-              <p className="mt-1 text-xs text-gray-500">
-                Hadir: {hadirHari} • Sakit: {sakitHari} • Izin: {izinHari} • Alpha
-                (otomatis): {alphaHari}
+            </div>
+
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <p className="mb-3 text-sm font-medium text-gray-700">
+                Status Kehadiran
+              </p>
+
+              <div className="space-y-3">
+                <label className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2">
+                  <input
+                    type="radio"
+                    value="hadir"
+                    checked={attendanceStatus === "hadir"}
+                    onChange={() => setAttendanceStatus("hadir")}
+                  />
+                  <span>Hadir</span>
+                </label>
+
+                <label className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2">
+                  <input
+                    type="radio"
+                    value="sakit"
+                    checked={attendanceStatus === "sakit"}
+                    onChange={() => setAttendanceStatus("sakit")}
+                  />
+                  <span>Sakit</span>
+                </label>
+
+                <label className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2">
+                  <input
+                    type="radio"
+                    value="izin"
+                    checked={attendanceStatus === "izin"}
+                    onChange={() => setAttendanceStatus("izin")}
+                  />
+                  <span>Izin</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <p className="text-sm font-medium text-gray-700">
+                {attendanceLabel}
+              </p>
+              <p className="mt-1 text-2xl font-bold text-green-600">
+                {loading ? "..." : `${attendancePercent}%`}
+              </p>
+              <p className="mt-2 text-xs leading-5 text-gray-500 sm:text-sm">
+                Hadir: {hadirHari} • Sakit: {sakitHari} • Izin: {izinHari} •
+                Alpha (otomatis): {alphaHari}
               </p>
             </div>
 
             <button
               onClick={handleSubmitAttendance}
               disabled={submittingAttendance || loading}
-              className="w-full rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition hover:bg-blue-700 disabled:opacity-60"
+              className="w-full rounded-lg bg-blue-600 px-4 py-2.5 font-medium text-white transition hover:bg-blue-700 disabled:opacity-60"
             >
-              {submittingAttendance ? 'Menyimpan...' : 'Submit'}
+              {submittingAttendance ? "Menyimpan..." : "Submit"}
             </button>
 
             {message && <p className="text-sm text-gray-700">{message}</p>}

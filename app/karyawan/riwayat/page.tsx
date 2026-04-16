@@ -1,22 +1,22 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { CardSection } from '@/components/CardSection';
-import { StatusBadge } from '@/components/StatusBadge';
-import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import Link from "next/link";
+import { CardSection } from "@/components/CardSection";
+import { StatusBadge } from "@/components/StatusBadge";
+import { Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
-import { useAuth } from '@/context/AuthContext';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, limit } from 'firebase/firestore';
+import { useAuth } from "@/context/AuthContext";
+import { db } from "@/lib/firebase";
+import { collection, getDocs, query, where, limit } from "firebase/firestore";
 
-type StatusPenilaian = 'draft' | 'dikirim' | 'dinilai';
+type StatusPenilaian = "draft" | "dikirim" | "dinilai";
 
 type PeriodeDoc = {
   namaPeriode?: string;
   nama?: string;
   name?: string;
-  status?: 'aktif' | 'ditutup';
+  status?: "aktif" | "ditutup";
 
   mulai?: any;
   selesai?: any;
@@ -61,32 +61,32 @@ type KriteriaDoc = {
 type PeriodeOption = {
   id: string;
   nama: string;
-  status: 'aktif' | 'ditutup';
+  status: "aktif" | "ditutup";
   _sortMs: number;
 };
 
 type HistoryRow = {
   periodeId: string;
   periode: string;
-  status: 'Dikirim' | 'Dinilai' | 'Draft';
+  status: "Dikirim" | "Dinilai" | "Draft";
   nilai: string;
 };
 
-function mapStatusToBadge(status: StatusPenilaian): HistoryRow['status'] {
-  if (status === 'dinilai') return 'Dinilai';
-  if (status === 'dikirim') return 'Dikirim';
-  return 'Draft';
+function mapStatusToBadge(status: StatusPenilaian): HistoryRow["status"] {
+  if (status === "dinilai") return "Dinilai";
+  if (status === "dikirim") return "Dikirim";
+  return "Draft";
 }
 
 function toDateSafe(v: any): Date | null {
   if (!v) return null;
 
-  if (typeof v?.toDate === 'function') return v.toDate();
+  if (typeof v?.toDate === "function") return v.toDate();
   if (v instanceof Date) return v;
 
-  if (typeof v === 'string') {
+  if (typeof v === "string") {
     if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
-      const [y, m, d] = v.split('-').map(Number);
+      const [y, m, d] = v.split("-").map(Number);
       return new Date(y, m - 1, d);
     }
 
@@ -120,8 +120,8 @@ function hitungNilaiAkhir(params: {
 
   let total = 0;
   for (const item of kriteria) {
-    const skor = typeof nilai[item.id] === 'number' ? Number(nilai[item.id]) : 0;
-    const bobot = typeof item.bobot === 'number' ? Number(item.bobot) : 0;
+    const skor = typeof nilai[item.id] === "number" ? Number(nilai[item.id]) : 0;
+    const bobot = typeof item.bobot === "number" ? Number(item.bobot) : 0;
     total += ((skor / 5) * 100) * (bobot / 100);
   }
 
@@ -129,7 +129,7 @@ function hitungNilaiAkhir(params: {
 }
 
 function mapPeriodeName(p?: PeriodeDoc | null, fallbackId?: string) {
-  return p?.namaPeriode || p?.nama || p?.name || fallbackId || '-';
+  return p?.namaPeriode || p?.nama || p?.name || fallbackId || "-";
 }
 
 function periodeSortMs(p?: PeriodeDoc | null) {
@@ -150,13 +150,13 @@ export default function RiwayatPenilaianPage() {
   const karyawanId = user?.karyawanId || uid;
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<HistoryRow[]>([]);
 
   const [periodeOptions, setPeriodeOptions] = useState<PeriodeOption[]>([]);
-  const [selectedPeriodeId, setSelectedPeriodeId] = useState<string>('');
+  const [selectedPeriodeId, setSelectedPeriodeId] = useState<string>("");
 
   const pageSize = 5;
 
@@ -172,18 +172,25 @@ export default function RiwayatPenilaianPage() {
       setLoading(true);
 
       try {
-        const periodeSnap = await getDocs(query(collection(db, 'periode_penilaian'), limit(500)));
+        const periodeSnap = await getDocs(
+          query(collection(db, "periode_penilaian"), limit(500))
+        );
+
         const pList: PeriodeOption[] = periodeSnap.docs
           .map((d) => {
             const data = d.data() as PeriodeDoc;
             return {
               id: d.id,
               nama: mapPeriodeName(data, d.id),
-              status: (data.status ?? 'ditutup') as 'aktif' | 'ditutup',
+              status: (data.status ?? "ditutup") as "aktif" | "ditutup",
               _sortMs: periodeSortMs(data),
             };
           })
-          .sort((a, b) => (b._sortMs !== a._sortMs ? b._sortMs - a._sortMs : a.nama.localeCompare(b.nama)));
+          .sort((a, b) =>
+            b._sortMs !== a._sortMs
+              ? b._sortMs - a._sortMs
+              : a.nama.localeCompare(b.nama)
+          );
 
         if (!mounted) return;
 
@@ -191,33 +198,46 @@ export default function RiwayatPenilaianPage() {
 
         setSelectedPeriodeId((prev) => {
           if (prev) return prev;
-          const aktif = pList.find((x) => x.status === 'aktif');
-          return aktif?.id ?? '';
+          const aktif = pList.find((x) => x.status === "aktif");
+          return aktif?.id ?? "";
         });
 
         const penilaianSnap = await getDocs(
-          query(collection(db, 'penilaian_kinerja'), where('karyawanId', '==', karyawanId), limit(500))
+          query(
+            collection(db, "penilaian_kinerja"),
+            where("karyawanId", "==", karyawanId),
+            limit(500)
+          )
         );
 
-        const penilaianList: Array<{ id: string; data: PenilaianDoc }> = penilaianSnap.docs.map((d) => ({
-          id: d.id,
-          data: d.data() as PenilaianDoc,
-        }));
+        const penilaianList: Array<{ id: string; data: PenilaianDoc }> =
+          penilaianSnap.docs.map((d) => ({
+            id: d.id,
+            data: d.data() as PenilaianDoc,
+          }));
 
         const periodeMap = new Map<string, PeriodeDoc>();
         periodeSnap.docs.forEach((d) => periodeMap.set(d.id, d.data() as PeriodeDoc));
 
         const periodeDinilaiSet = new Set<string>();
         penilaianList.forEach(({ data }) => {
-          if (data.status === 'dinilai' && data.periodeId) {
+          if (data.status === "dinilai" && data.periodeId) {
             periodeDinilaiSet.add(data.periodeId);
           }
         });
 
-        const kriteriaCache = new Map<string, Array<{ id: string; bobot: number; urutan: number }>>();
+        const kriteriaCache = new Map<
+          string,
+          Array<{ id: string; bobot: number; urutan: number }>
+        >();
+
         for (const periodeId of Array.from(periodeDinilaiSet)) {
           const kriSnap = await getDocs(
-            query(collection(db, 'kriteria_penilaian'), where('periodeId', '==', periodeId), limit(500))
+            query(
+              collection(db, "kriteria_penilaian"),
+              where("periodeId", "==", periodeId),
+              limit(500)
+            )
           );
 
           const list = kriSnap.docs
@@ -234,38 +254,45 @@ export default function RiwayatPenilaianPage() {
           kriteriaCache.set(periodeId, list);
         }
 
-        const merged: Array<HistoryRow & { _sortTime: number }> = penilaianList.map(({ data }) => {
-          const periode = periodeMap.get(data.periodeId);
-          const namaPeriode = mapPeriodeName(periode, data.periodeId);
+        const merged: Array<HistoryRow & { _sortTime: number }> = penilaianList.map(
+          ({ data }) => {
+            const periode = periodeMap.get(data.periodeId);
+            const namaPeriode = mapPeriodeName(periode, data.periodeId);
 
-          let nilaiTampil = '-';
+            let nilaiTampil = "-";
 
-          if (data.status === 'dinilai') {
-            if (typeof data.totalNilai === 'number' && Number.isFinite(data.totalNilai)) {
-              nilaiTampil = formatNilai(data.totalNilai);
-            } else {
-              const kriteria = kriteriaCache.get(data.periodeId) ?? [];
-              nilaiTampil = formatNilai(
-                hitungNilaiAkhir({
-                  nilai: data.nilaiAdmin ?? {},
-                  kriteria,
-                })
-              );
+            if (data.status === "dinilai") {
+              if (typeof data.totalNilai === "number" && Number.isFinite(data.totalNilai)) {
+                nilaiTampil = formatNilai(data.totalNilai);
+              } else {
+                const kriteria = kriteriaCache.get(data.periodeId) ?? [];
+                nilaiTampil = formatNilai(
+                  hitungNilaiAkhir({
+                    nilai: data.nilaiAdmin ?? {},
+                    kriteria,
+                  })
+                );
+              }
             }
+
+            const sortTime =
+              getSortableTime(data.updatedAt) || getSortableTime(data.createdAt) || 0;
+
+            return {
+              periodeId: data.periodeId,
+              periode: namaPeriode,
+              status: mapStatusToBadge(data.status),
+              nilai: nilaiTampil,
+              _sortTime: sortTime,
+            };
           }
+        );
 
-          const sortTime = getSortableTime(data.updatedAt) || getSortableTime(data.createdAt) || 0;
-
-          return {
-            periodeId: data.periodeId,
-            periode: namaPeriode,
-            status: mapStatusToBadge(data.status),
-            nilai: nilaiTampil,
-            _sortTime: sortTime,
-          };
-        });
-
-        merged.sort((a, b) => (b._sortTime !== a._sortTime ? b._sortTime - a._sortTime : b.periode.localeCompare(a.periode)));
+        merged.sort((a, b) =>
+          b._sortTime !== a._sortTime
+            ? b._sortTime - a._sortTime
+            : b.periode.localeCompare(a.periode)
+        );
 
         if (!mounted) return;
         setRows(merged.map(({ _sortTime, ...rest }) => rest));
@@ -319,18 +346,20 @@ export default function RiwayatPenilaianPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Riwayat Penilaian</h1>
+        <h1 className="text-2xl font-bold text-gray-900 md:text-3xl">
+          Riwayat Penilaian
+        </h1>
       </div>
 
       <CardSection>
-        <div className="flex gap-4 items-center">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
           <select
             value={selectedPeriodeId}
             onChange={(e) => {
               setSelectedPeriodeId(e.target.value);
               setCurrentPage(1);
             }}
-            className="px-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 md:w-auto md:min-w-[220px]"
           >
             <option value="">Semua periode</option>
             {periodeOptions.map((p) => (
@@ -340,8 +369,11 @@ export default function RiwayatPenilaianPage() {
             ))}
           </select>
 
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+          <div className="relative w-full flex-1">
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              size={18}
+            />
             <input
               type="text"
               placeholder="Cari..."
@@ -350,21 +382,86 @@ export default function RiwayatPenilaianPage() {
                 setSearchQuery(e.target.value);
                 setCurrentPage(1);
               }}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-4 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
         </div>
       </CardSection>
 
       <CardSection>
-        <div className="overflow-x-auto">
+        {/* Mobile */}
+        <div className="space-y-4 md:hidden">
+          {loading ? (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+              Memuat data...
+            </div>
+          ) : pagedData.length === 0 ? (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+              Belum ada riwayat penilaian.
+            </div>
+          ) : (
+            pagedData.map((item, idx) => (
+              <div
+                key={`${item.periodeId}_${idx}`}
+                className="rounded-xl border border-gray-200 bg-gray-50 p-4"
+              >
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                      Periode
+                    </p>
+                    <p className="mt-1 font-semibold text-gray-900">{item.periode}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                        Status
+                      </p>
+                      <div className="mt-1">
+                        <StatusBadge status={item.status} />
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                        Nilai Akhir
+                      </p>
+                      <p className="mt-1 text-gray-700">{item.nilai}</p>
+                    </div>
+                  </div>
+
+                  <div className="pt-1">
+                    <Link
+                      href={`/karyawan/riwayat/${item.periodeId}/detail`}
+                      className="inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700"
+                    >
+                      Lihat
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Desktop */}
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">
-                <th className="px-6 py-3 text-left font-semibold text-gray-700 bg-gray-50">Periode</th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700 bg-gray-50">Status</th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700 bg-gray-50">Nilai Akhir</th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700 bg-gray-50">Aksi</th>
+                <th className="bg-gray-50 px-6 py-3 text-left font-semibold text-gray-700">
+                  Periode
+                </th>
+                <th className="bg-gray-50 px-6 py-3 text-left font-semibold text-gray-700">
+                  Status
+                </th>
+                <th className="bg-gray-50 px-6 py-3 text-left font-semibold text-gray-700">
+                  Nilai Akhir
+                </th>
+                <th className="bg-gray-50 px-6 py-3 text-left font-semibold text-gray-700">
+                  Aksi
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -382,8 +479,11 @@ export default function RiwayatPenilaianPage() {
                 </tr>
               ) : (
                 pagedData.map((item, idx) => (
-                  <tr key={`${item.periodeId}_${idx}`} className="border-b border-gray-200 hover:bg-gray-50">
-                    <td className="px-6 py-4 text-gray-900 font-medium">{item.periode}</td>
+                  <tr
+                    key={`${item.periodeId}_${idx}`}
+                    className="border-b border-gray-200 hover:bg-gray-50"
+                  >
+                    <td className="px-6 py-4 font-medium text-gray-900">{item.periode}</td>
                     <td className="px-6 py-4">
                       <StatusBadge status={item.status} />
                     </td>
@@ -391,7 +491,7 @@ export default function RiwayatPenilaianPage() {
                     <td className="px-6 py-4">
                       <Link
                         href={`/karyawan/riwayat/${item.periodeId}/detail`}
-                        className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition"
+                        className="inline-block rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
                       >
                         Lihat
                       </Link>
@@ -403,9 +503,9 @@ export default function RiwayatPenilaianPage() {
           </table>
         </div>
 
-        <div className="flex items-center justify-center gap-2 mt-6">
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
           <button
-            className="p-2 hover:bg-gray-100 rounded-lg transition"
+            className="rounded-lg p-2 transition hover:bg-gray-100 disabled:opacity-50"
             onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
             disabled={safeCurrentPage <= 1}
           >
@@ -416,8 +516,10 @@ export default function RiwayatPenilaianPage() {
             <button
               key={page}
               onClick={() => setCurrentPage(page)}
-              className={`w-8 h-8 rounded-lg font-medium transition ${
-                safeCurrentPage === page ? 'bg-blue-600 text-white' : 'hover:bg-gray-100 text-gray-700'
+              className={`h-9 min-w-[36px] rounded-lg px-2 font-medium transition ${
+                safeCurrentPage === page
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-700 hover:bg-gray-100"
               }`}
             >
               {page}
@@ -425,7 +527,7 @@ export default function RiwayatPenilaianPage() {
           ))}
 
           <button
-            className="p-2 hover:bg-gray-100 rounded-lg transition"
+            className="rounded-lg p-2 transition hover:bg-gray-100 disabled:opacity-50"
             onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
             disabled={safeCurrentPage >= totalPages}
           >
