@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   collection,
   doc,
-  getDoc,
   getDocs,
   query,
   where,
@@ -80,6 +79,43 @@ function normalizePeriode(id: string, raw: any): ActivePeriode {
     selesai: raw?.selesai ?? raw?.endDate ?? raw?.tanggalSelesai ?? raw?.akhir,
     createdAt: raw?.createdAt,
     updatedAt: raw?.updatedAt,
+  };
+}
+
+function isTodayInsidePeriode(today: Date, periode?: ActivePeriode | null) {
+  const pStart = toDateSafe(periode?.mulai);
+  const pEnd = toDateSafe(periode?.selesai);
+
+  if (!pStart || !pEnd) return false;
+
+  const t = startOfDay(today).getTime();
+  const s = startOfDay(pStart).getTime();
+  const e = startOfDay(pEnd).getTime();
+
+  return t >= s && t <= e;
+}
+
+function resolveAttendanceRange(today: Date, periode?: ActivePeriode | null) {
+  if (isTodayInsidePeriode(today, periode)) {
+    return {
+      start: startOfDay(toDateSafe(periode?.mulai)!),
+      end: startOfDay(toDateSafe(periode?.selesai)!),
+      pakaiPeriodeAktif: true,
+    };
+  }
+
+  const month = today.getMonth() + 1;
+  const year = today.getFullYear();
+  const r = getMonthRange(year, month);
+  const start = startOfDay(r.start);
+
+  const endInc = new Date(r.end);
+  endInc.setDate(endInc.getDate() - 1);
+
+  return {
+    start,
+    end: startOfDay(endInc),
+    pakaiPeriodeAktif: false,
   };
 }
 
@@ -175,10 +211,16 @@ export default function DashboardPage() {
         if (periode?.id) {
           const penilaianId = `${karyawanId}_${periode.id}`;
           const penilaianRef = doc(db, "penilaian_kinerja", penilaianId);
-          const snapPenilaian = await getDoc(penilaianRef);
+          const snapPenilaian = await getDocs(
+            query(
+              collection(db, "penilaian_kinerja"),
+              where("karyawanId", "==", karyawanId),
+              where("periodeId", "==", periode.id)
+            )
+          );
 
-          if (snapPenilaian.exists()) {
-            const data = snapPenilaian.data() as any;
+          if (!snapPenilaian.empty) {
+            const data = snapPenilaian.docs[0].data() as any;
 
             const nilaiKaryawan = data?.nilaiKaryawan ?? {};
             const filled =
@@ -196,6 +238,8 @@ export default function DashboardPage() {
             setFilledCount(0);
             setPenilaianStatus("draft");
           }
+
+          void penilaianRef;
         } else {
           setFilledCount(0);
           setPenilaianStatus("draft");
@@ -226,28 +270,11 @@ export default function DashboardPage() {
     karyawanIdArg: string,
     periode?: ActivePeriode | null
   ) {
-    let start: Date;
-    let end: Date;
-
-    const pStart = toDateSafe(periode?.mulai);
-    const pEnd = toDateSafe(periode?.selesai);
-
-    if (pStart && pEnd) {
-      start = startOfDay(pStart);
-      end = startOfDay(pEnd);
-    } else {
-      const month = today.getMonth() + 1;
-      const year = today.getFullYear();
-      const r = getMonthRange(year, month);
-      start = startOfDay(r.start);
-
-      const endInc = new Date(r.end);
-      endInc.setDate(endInc.getDate() - 1);
-      end = startOfDay(endInc);
-    }
+    const { start, end } = resolveAttendanceRange(today, periode);
 
     let totalHariKerja = 0;
     const cursor = new Date(start);
+
     while (cursor <= end) {
       if (cursor.getDay() !== 0) totalHariKerja += 1;
       cursor.setDate(cursor.getDate() + 1);
@@ -309,7 +336,6 @@ export default function DashboardPage() {
     try {
       const absensiId = `${karyawanId}_${todayString}`;
       const absensiRef = doc(db, "absensi", absensiId);
-      const existingSnap = await getDoc(absensiRef);
 
       await setDoc(
         absensiRef,
@@ -319,7 +345,6 @@ export default function DashboardPage() {
           tanggal: todayString,
           statusKehadiran: attendanceStatus,
           updatedAt: serverTimestamp(),
-          ...(existingSnap.exists() ? {} : { createdAt: serverTimestamp() }),
         },
         { merge: true }
       );
@@ -337,9 +362,12 @@ export default function DashboardPage() {
   const belumDiisi = Math.max(criteriaCount - filledCount, 0);
   const ctaText =
     penilaianStatus === "draft" ? "Lanjutkan penilaian" : "Lihat penilaian";
-  const attendanceLabel = activePeriod
-    ? "Kehadiran periode aktif (hari kerja)"
-    : "Kehadiran bulan ini (hari kerja)";
+
+  const attendanceLabel = useMemo(() => {
+    return isTodayInsidePeriode(today, activePeriod)
+      ? "Kehadiran periode aktif (hari kerja)"
+      : "Kehadiran bulan ini (hari kerja)";
+  }, [today, activePeriod]);
 
   return (
     <div className="space-y-6">
