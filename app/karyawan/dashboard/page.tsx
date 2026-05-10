@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   query,
   where,
@@ -95,30 +96,6 @@ function isTodayInsidePeriode(today: Date, periode?: ActivePeriode | null) {
   return t >= s && t <= e;
 }
 
-function resolveAttendanceRange(today: Date, periode?: ActivePeriode | null) {
-  if (isTodayInsidePeriode(today, periode)) {
-    return {
-      start: startOfDay(toDateSafe(periode?.mulai)!),
-      end: startOfDay(toDateSafe(periode?.selesai)!),
-      pakaiPeriodeAktif: true,
-    };
-  }
-
-  const month = today.getMonth() + 1;
-  const year = today.getFullYear();
-  const r = getMonthRange(year, month);
-  const start = startOfDay(r.start);
-
-  const endInc = new Date(r.end);
-  endInc.setDate(endInc.getDate() - 1);
-
-  return {
-    start,
-    end: startOfDay(endInc),
-    pakaiPeriodeAktif: false,
-  };
-}
-
 function StatItem({
   icon,
   label,
@@ -170,6 +147,8 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!karyawanId) return;
 
+    const currentKaryawanId = karyawanId;
+
     async function loadData() {
       setLoading(true);
       setMessage("");
@@ -209,18 +188,12 @@ export default function DashboardPage() {
         }
 
         if (periode?.id) {
-          const penilaianId = `${karyawanId}_${periode.id}`;
+          const penilaianId = `${currentKaryawanId}_${periode.id}`;
           const penilaianRef = doc(db, "penilaian_kinerja", penilaianId);
-          const snapPenilaian = await getDocs(
-            query(
-              collection(db, "penilaian_kinerja"),
-              where("karyawanId", "==", karyawanId),
-              where("periodeId", "==", periode.id)
-            )
-          );
+          const snapPenilaian = await getDoc(penilaianRef);
 
-          if (!snapPenilaian.empty) {
-            const data = snapPenilaian.docs[0].data() as any;
+          if (snapPenilaian.exists()) {
+            const data = snapPenilaian.data() as any;
 
             const nilaiKaryawan = data?.nilaiKaryawan ?? {};
             const filled =
@@ -238,14 +211,12 @@ export default function DashboardPage() {
             setFilledCount(0);
             setPenilaianStatus("draft");
           }
-
-          void penilaianRef;
         } else {
           setFilledCount(0);
           setPenilaianStatus("draft");
         }
 
-        await refreshAttendanceSummary(karyawanId, periode);
+        await refreshAttendanceSummary(currentKaryawanId, periode);
       } catch (error) {
         console.error(error);
         setActivePeriod(null);
@@ -270,11 +241,29 @@ export default function DashboardPage() {
     karyawanIdArg: string,
     periode?: ActivePeriode | null
   ) {
-    const { start, end } = resolveAttendanceRange(today, periode);
+    let start: Date;
+    let end: Date;
+
+    const pakaiPeriodeAktif = isTodayInsidePeriode(today, periode);
+    const pStart = toDateSafe(periode?.mulai);
+    const pEnd = toDateSafe(periode?.selesai);
+
+    if (pakaiPeriodeAktif && pStart && pEnd) {
+      start = startOfDay(pStart);
+      end = startOfDay(pEnd);
+    } else {
+      const month = today.getMonth() + 1;
+      const year = today.getFullYear();
+      const r = getMonthRange(year, month);
+      start = startOfDay(r.start);
+
+      const endInc = new Date(r.end);
+      endInc.setDate(endInc.getDate() - 1);
+      end = startOfDay(endInc);
+    }
 
     let totalHariKerja = 0;
     const cursor = new Date(start);
-
     while (cursor <= end) {
       if (cursor.getDay() !== 0) totalHariKerja += 1;
       cursor.setDate(cursor.getDate() + 1);
@@ -330,27 +319,31 @@ export default function DashboardPage() {
   const handleSubmitAttendance = async () => {
     if (!karyawanId) return;
 
+    const currentKaryawanId = karyawanId;
+
     setSubmittingAttendance(true);
     setMessage("");
 
     try {
-      const absensiId = `${karyawanId}_${todayString}`;
+      const absensiId = `${currentKaryawanId}_${todayString}`;
       const absensiRef = doc(db, "absensi", absensiId);
+      const existingSnap = await getDoc(absensiRef);
 
       await setDoc(
         absensiRef,
         {
           id: absensiId,
-          karyawanId,
+          karyawanId: currentKaryawanId,
           tanggal: todayString,
           statusKehadiran: attendanceStatus,
           updatedAt: serverTimestamp(),
+          ...(existingSnap.exists() ? {} : { createdAt: serverTimestamp() }),
         },
         { merge: true }
       );
 
       setMessage("Absensi berhasil disimpan.");
-      await refreshAttendanceSummary(karyawanId, activePeriod);
+      await refreshAttendanceSummary(currentKaryawanId, activePeriod);
     } catch (error) {
       console.error(error);
       setMessage("Gagal menyimpan absensi.");
@@ -363,11 +356,9 @@ export default function DashboardPage() {
   const ctaText =
     penilaianStatus === "draft" ? "Lanjutkan penilaian" : "Lihat penilaian";
 
-  const attendanceLabel = useMemo(() => {
-    return isTodayInsidePeriode(today, activePeriod)
-      ? "Kehadiran periode aktif (hari kerja)"
-      : "Kehadiran bulan ini (hari kerja)";
-  }, [today, activePeriod]);
+  const attendanceLabel = isTodayInsidePeriode(today, activePeriod)
+    ? "Kehadiran periode aktif (hari kerja)"
+    : "Kehadiran bulan ini (hari kerja)";
 
   return (
     <div className="space-y-6">
