@@ -13,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-
+import Image from 'next/image';
 interface AppShellProps {
   children: React.ReactNode;
 }
@@ -93,9 +93,13 @@ export function AppShell({ children }: AppShellProps) {
       >
         <div className="flex h-20 items-center justify-between border-b border-gray-200 px-4">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-700 text-sm font-bold text-white">
-              CV
-            </div>
+          <Image
+  src="/images/logo.png"
+  alt="CV Natas Nitis Netes"
+  width={40}
+  height={40}
+  className="rounded-full shrink-0"
+/>
             <span className="truncate text-sm font-semibold text-gray-900">
               CV natas nitis netes
             </span>
@@ -175,9 +179,13 @@ export function AppShell({ children }: AppShellProps) {
                 <Menu size={22} />
               </button>
 
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-700 text-sm font-bold">
-                CV
-              </div>
+           <Image
+  src="/images/logo.png"
+  alt="CV Natas Nitis Netes"
+  width={40}
+  height={40}
+  className="rounded-full shrink-0"
+/>
 
               <span className="truncate text-sm font-semibold sm:text-lg">
                 CV natas nitis netes

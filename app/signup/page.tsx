@@ -6,7 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Link from 'next/link';
-
+import Image from 'next/image';
 export default function SignupPage() {
   const router = useRouter();
   const { signup } = useAuth();
@@ -68,9 +68,13 @@ export default function SignupPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2 mb-4">
-            <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center text-white font-bold">
-              CV
-            </div>
+            <Image
+  src="/images/logo.png"
+  alt="CV Natas Nitis Netes"
+  width={40}
+  height={40}
+  className="rounded-full"
+/>
             <h1 className="text-2xl font-bold text-blue-900">CV Natas Nitis Netes</h1>
           </div>
           <p className="text-gray-600">Sistem Penilaian Kinerja Karyawan</p>

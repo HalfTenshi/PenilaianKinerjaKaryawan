@@ -3,7 +3,7 @@
 import { User, LogOut } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-
+import Image from 'next/image';
 export function Topbar() {
   const router = useRouter();
   const { logout } = useAuth();
@@ -16,9 +16,13 @@ export function Topbar() {
   return (
     <header className="fixed top-0 left-80 right-0 h-24 bg-blue-900 text-white px-8 flex items-center justify-between z-40">
       <div className="flex items-center gap-3">
-        <div className="w-12 h-12 bg-blue-700 rounded-full flex items-center justify-center text-sm font-bold">
-          CV
-        </div>
+       <Image
+  src="/images/logo.png"
+  alt="CV Natas Nitis Netes"
+  width={40}
+  height={40}
+  className="rounded-full shrink-0"
+/>
         <span className="text-xl font-semibold">CV natas nitis netes</span>
       </div>
 
