@@ -6,6 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -71,9 +72,13 @@ export default function LoginPage() {
         {/* Header */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-3 mb-4">
-            <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-md">
-              CV
-            </div>
+            <Image
+  src="/images/logo.png"
+  alt="CV Natas Nitis Netes"
+  width={48}
+  height={48}
+  className="rounded-full shadow-md"
+/>
             <h1 className="text-2xl font-bold text-blue-900">
               CV natas nitis netes
             </h1>
