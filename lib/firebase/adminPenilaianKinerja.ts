@@ -19,6 +19,8 @@ import type {
   Absensi,
   StatusPenilaian,
   StatusKehadiran,
+  GapAnalysis,    // ← BARU
+  GapFlag,        // ← BARU
 } from '@/types/models';
 
 export type { PeriodePenilaian, KriteriaPenilaian, Karyawan, PenilaianKinerja };
@@ -309,6 +311,54 @@ export function hitungNilaiAkhir(params: {
   return round2(total);
 }
 
+// ─── BARU ────────────────────────────────────────────────────────────────────
+/**
+ * Hitung gap analysis antara nilaiKaryawan dan nilaiAdmin.
+ *
+ * Gap per kriteria = nilaiKaryawan − nilaiAdmin
+ * - Positif  → karyawan menilai diri lebih tinggi dari admin (leniency bias)
+ * - Negatif  → karyawan menilai diri lebih rendah dari admin (under-confidence)
+ *
+ * Flag global berdasarkan rata-rata ABSOLUT gap:
+ * - ≤ 1   → 'normal'
+ * - 1–2   → 'waspada'
+ * - > 2   → 'bias-tinggi'
+ */
+export function hitungGapAnalysis(params: {
+  nilaiKaryawan: Record<string, number> | undefined;
+  nilaiAdmin: Record<string, number>;
+  kriteria: KriteriaPenilaian[];
+}): GapAnalysis {
+  const safeKaryawan = sanitizeNilaiMap(params.nilaiKaryawan);
+  const safeAdmin    = sanitizeNilaiMap(params.nilaiAdmin);
+
+  const perKriteria: Record<string, number> = {};
+  let totalAbsGap = 0;
+  let count = 0;
+
+  for (const k of params.kriteria) {
+    const nilaiK = safeKaryawan[k.id];
+    const nilaiA = safeAdmin[k.id] ?? 0;
+
+    // Hanya hitung gap jika karyawan mengisi nilai (nilaiK > 0)
+    if (nilaiK !== undefined && nilaiK > 0) {
+      const gap = round2(nilaiK - nilaiA);
+      perKriteria[k.id] = gap;
+      totalAbsGap += Math.abs(gap);
+      count++;
+    }
+  }
+
+  const rataRataGap = count > 0 ? round2(totalAbsGap / count) : 0;
+
+  const flagGlobal: GapFlag =
+    rataRataGap <= 1 ? 'normal' :
+    rataRataGap <= 2 ? 'waspada' : 'bias-tinggi';
+
+  return { perKriteria, rataRataGap, flagGlobal };
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Summary absensi final:
  * - Hari kerja: Senin–Sabtu
@@ -417,14 +467,10 @@ export async function getAttendanceSummary(params: {
  * FINAL:
  * - simpan nilaiAdmin
  * - simpan catatanAdmin
- * - simpan totalNilai
+ * - simpan totalNilai (dihitung dari rumus)
+ * - simpan gapAnalysis (BARU — analisis diskrepansi self-assessment)
  * - status = 'dinilai'
  * - jangan kirim undefined ke Firestore
- *
- * Catatan:
- * totalNilai dihitung otomatis dari nilaiAdmin + bobot kriteria.
- * Kalau caller masih mengirim totalNilai / totalNilaiAdmin, tetap aman
- * karena file ini akan memakai nilai yang valid dan menyimpan ke field final: totalNilai
  */
 export async function submitEvaluasiAdmin(params: {
   penilaianId: string;
@@ -449,6 +495,7 @@ export async function submitEvaluasiAdmin(params: {
   const kriteria = await getKriteriaByPeriode(penilaian.periodeId);
   const safeNilaiAdmin = sanitizeNilaiMap(params.nilaiAdmin);
 
+  // Hitung total nilai dari rumus baku
   const totalDariRumus = hitungNilaiAkhir({
     nilai: safeNilaiAdmin,
     kriteria,
@@ -457,10 +504,19 @@ export async function submitEvaluasiAdmin(params: {
   const fallbackTotal = toNumberOrZero(params.totalNilai ?? params.totalNilaiAdmin);
   const totalNilai = round2(totalDariRumus || fallbackTotal);
 
+  // ─── BARU: Hitung gap analysis ────────────────────────────────────────────
+  const gapAnalysis = hitungGapAnalysis({
+    nilaiKaryawan: penilaian.nilaiKaryawan,
+    nilaiAdmin: safeNilaiAdmin,
+    kriteria,
+  });
+  // ──────────────────────────────────────────────────────────────────────────
+
   const payload = hapusUndefined({
     nilaiAdmin: safeNilaiAdmin,
     catatanAdmin: params.catatanAdmin ?? '',
     totalNilai,
+    gapAnalysis,                            // ← BARU: simpan ke Firestore
     status: 'dinilai' as StatusPenilaian,
     updatedAt: serverTimestamp(),
   });

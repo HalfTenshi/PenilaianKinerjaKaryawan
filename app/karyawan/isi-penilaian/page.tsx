@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   collection,
@@ -17,6 +17,8 @@ import {
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/context/AuthContext";
 import { CardSection } from "@/components/CardSection";
+
+// ── Tipe lokal ──────────────────────────────────────────────────────────────
 
 type PeriodePenilaianDoc = {
   namaPeriode: string;
@@ -38,6 +40,14 @@ type KriteriaPenilaianDoc = {
   namaKriteria: string;
   bobot: number;
   urutan: number;
+  // ── BARU: deskripsi BARS per skor ──────────────────────────────────────
+  deskripsiSkor?: {
+    '1'?: string;
+    '2'?: string;
+    '3'?: string;
+    '4'?: string;
+    '5'?: string;
+  };
 };
 
 type PenilaianKinerjaDoc = {
@@ -56,6 +66,8 @@ type PenilaianKinerjaDoc = {
   createdAt?: any;
   updatedAt?: any;
 };
+
+// ── Helper ──────────────────────────────────────────────────────────────────
 
 function toDateSafe(value: any): Date | null {
   if (!value) return null;
@@ -161,6 +173,24 @@ function hitungTotalBerbobot(params: {
   return Math.round(total * 100) / 100;
 }
 
+// ── Konfigurasi visual skor ─────────────────────────────────────────────────
+
+const SKOR_LABEL: Record<number, string> = {
+  1: "Sangat Kurang",
+  2: "Kurang",
+  3: "Cukup",
+  4: "Baik",
+  5: "Sangat Baik",
+};
+
+const SKOR_WARNA_BARS: Record<number, string> = {
+  1: "border-red-300 bg-red-50 text-red-800",
+  2: "border-orange-300 bg-orange-50 text-orange-800",
+  3: "border-yellow-300 bg-yellow-50 text-yellow-800",
+  4: "border-blue-300 bg-blue-50 text-blue-800",
+  5: "border-green-300 bg-green-50 text-green-800",
+};
+
 function ratingBoxClass(active: boolean, disabled: boolean) {
   if (disabled) {
     return active
@@ -173,19 +203,44 @@ function ratingBoxClass(active: boolean, disabled: boolean) {
     : "border-gray-300 bg-white text-gray-700 hover:border-blue-400 hover:bg-blue-50";
 }
 
+// ── Komponen BarsInfo: tampil deskripsi BARS saat skor dipilih ─────────────
+
+function BarsInfo({
+  skor,
+  deskripsi,
+}: {
+  skor: number;
+  deskripsi: string;
+}) {
+  return (
+    <div
+      className={`mt-3 flex items-start gap-3 rounded-lg border px-4 py-3 text-sm ${SKOR_WARNA_BARS[skor] ?? "border-gray-200 bg-gray-50 text-gray-700"}`}
+    >
+      <span className="shrink-0 font-bold">{skor}</span>
+      <div>
+        <span className="font-semibold">{SKOR_LABEL[skor]} — </span>
+        <span>{deskripsi}</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Page utama ──────────────────────────────────────────────────────────────
+
 export default function IsiPenilaianPage() {
   const router = useRouter();
   const { user, isLoading: authLoading } = useAuth();
   const karyawanId = user?.karyawanId;
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>("");
+  const [loading, setLoading]   = useState(true);
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState<string>("");
 
   const [periodeAktif, setPeriodeAktif] = useState<{
     id: string;
     data: PeriodePenilaianDoc;
   } | null>(null);
+
   const [kriteria, setKriteria] = useState<
     Array<{ id: string; data: KriteriaPenilaianDoc }>
   >([]);
@@ -207,6 +262,8 @@ export default function IsiPenilaianPage() {
       kriteria,
     });
   }, [nilaiKaryawan, kriteria]);
+
+  // ── Load data ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (authLoading) return;
@@ -271,12 +328,14 @@ export default function IsiPenilaianPage() {
           )
         );
 
+        // ── BARU: muat deskripsiSkor dari Firestore bersama kriteria ────
         const kriteriaList = snapKriteria.docs
           .map((d) => ({
             id: d.id,
             data: d.data() as KriteriaPenilaianDoc,
           }))
           .sort((a, b) => (a.data.urutan ?? 0) - (b.data.urutan ?? 0));
+        // ────────────────────────────────────────────────────────────────
 
         setKriteria(kriteriaList);
 
@@ -308,6 +367,8 @@ export default function IsiPenilaianPage() {
     loadAll();
   }, [authLoading, karyawanId]);
 
+  // ── Handler rating ─────────────────────────────────────────────────────────
+
   const handleRatingChange = (kriteriaId: string, rating: number) => {
     if (statusPenilaian !== "draft") return;
 
@@ -317,6 +378,8 @@ export default function IsiPenilaianPage() {
       [kriteriaId]: safeRating,
     }));
   };
+
+  // ── Simpan draft ───────────────────────────────────────────────────────────
 
   const handleSimpanDraft = async () => {
     if (!karyawanId) return;
@@ -355,6 +418,8 @@ export default function IsiPenilaianPage() {
       setSaving(false);
     }
   };
+
+  // ── Kirim penilaian ────────────────────────────────────────────────────────
 
   const handleKirimPenilaian = async () => {
     if (!karyawanId) return;
@@ -403,6 +468,8 @@ export default function IsiPenilaianPage() {
     }
   };
 
+  // ── Loading / not-logged-in ────────────────────────────────────────────────
+
   if (authLoading || loading) {
     return (
       <div className="space-y-6">
@@ -448,6 +515,7 @@ export default function IsiPenilaianPage() {
         </CardSection>
       )}
 
+      {/* ── Periode aktif ─────────────────────────────────────────────────── */}
       <CardSection title="Periode aktif">
         {periodeAktif ? (
           <div className="space-y-2">
@@ -467,12 +535,22 @@ export default function IsiPenilaianPage() {
         )}
       </CardSection>
 
+      {/* ── Petunjuk ──────────────────────────────────────────────────────── */}
       <CardSection>
-        <p className="text-sm text-gray-700 md:text-base">
-          Silahkan isi nilai penilaian kerja anda pada periode ini :
-        </p>
+        <div className="space-y-2">
+          <p className="text-sm text-gray-700 md:text-base">
+            Silahkan isi nilai penilaian kerja anda pada periode ini.
+          </p>
+          {/* ── BARU: petunjuk BARS ──────────────────────────────────────── */}
+          <p className="text-xs text-blue-600">
+            💡 Setelah memilih nilai, panduan deskripsi perilaku (BARS) akan
+            muncul di bawah setiap kriteria untuk membantu memastikan penilaian
+            yang tepat dan objektif.
+          </p>
+        </div>
       </CardSection>
 
+      {/* ── Preview nilai sementara ───────────────────────────────────────── */}
       <CardSection>
         <div className="flex flex-col gap-1">
           <p className="text-sm text-gray-600">Total Nilai Sementara</p>
@@ -486,15 +564,18 @@ export default function IsiPenilaianPage() {
         </div>
       </CardSection>
 
+      {/* ── Form kriteria ──────────────────────────────────────────────────── */}
       <CardSection title="Kriteria Penilaian">
         {kriteria.length === 0 ? (
           <p className="text-gray-500">Kriteria belum diatur untuk periode ini.</p>
         ) : (
           <>
-            {/* Mobile */}
+            {/* ────────────── Mobile ────────────── */}
             <div className="space-y-4 md:hidden">
               {kriteria.map((item, index) => {
-                const selected = nilaiKaryawan[item.id];
+                const selected  = nilaiKaryawan[item.id];
+                const barsKey   = selected ? String(selected) as '1'|'2'|'3'|'4'|'5' : null;
+                const barsTeks  = barsKey ? (item.data.deskripsiSkor?.[barsKey] ?? '') : '';
 
                 return (
                   <div
@@ -513,6 +594,7 @@ export default function IsiPenilaianPage() {
                       </p>
                     </div>
 
+                    {/* Rating buttons */}
                     <div className="grid grid-cols-5 gap-2">
                       {[1, 2, 3, 4, 5].map((rating) => {
                         const active = selected === rating;
@@ -540,15 +622,21 @@ export default function IsiPenilaianPage() {
                       })}
                     </div>
 
-                    <p className="mt-3 text-xs text-gray-500">
-                      Nilai dipilih: {selected ?? "-"}
-                    </p>
+                    {/* ── BARU: BARS description (mobile) ─────────────── */}
+                    {selected && barsTeks && (
+                      <BarsInfo skor={selected} deskripsi={barsTeks} />
+                    )}
+                    {selected && !barsTeks && (
+                      <p className="mt-2 text-xs text-gray-400">
+                        Nilai dipilih: <strong>{selected}</strong> — {SKOR_LABEL[selected]}
+                      </p>
+                    )}
                   </div>
                 );
               })}
             </div>
 
-            {/* Desktop */}
+            {/* ────────────── Desktop ────────────── */}
             <div className="hidden overflow-x-auto md:block">
               <table className="w-full min-w-[760px]">
                 <thead>
@@ -581,35 +669,60 @@ export default function IsiPenilaianPage() {
                 </thead>
 
                 <tbody>
-                  {kriteria.map((item) => (
-                    <tr
-                      key={item.id}
-                      className="border-b border-gray-200 hover:bg-gray-50"
-                    >
-                      <td className="px-4 py-4 font-medium text-gray-900">
-                        {item.data.namaKriteria}
-                      </td>
-                      <td className="px-4 py-4 text-gray-700">
-                        {item.data.bobot}%
-                      </td>
+                  {kriteria.map((item) => {
+                    const selected  = nilaiKaryawan[item.id];
+                    const barsKey   = selected ? String(selected) as '1'|'2'|'3'|'4'|'5' : null;
+                    const barsTeks  = barsKey ? (item.data.deskripsiSkor?.[barsKey] ?? '') : '';
 
-                      {[1, 2, 3, 4, 5].map((rating) => (
-                        <td key={rating} className="px-3 py-4 text-center">
-                          <label className="flex justify-center">
-                            <input
-                              type="radio"
-                              name={`rating-${item.id}`}
-                              value={rating}
-                              checked={nilaiKaryawan[item.id] === rating}
-                              onChange={() => handleRatingChange(item.id, rating)}
-                              className="h-4 w-4 cursor-pointer"
-                              disabled={isReadOnly}
-                            />
-                          </label>
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
+                    return (
+                      // Pakai Fragment agar bisa tambah baris BARS di bawah baris utama
+                      <Fragment key={item.id}>
+                        {/* Baris utama rating */}
+                        <tr className="border-b border-gray-200 hover:bg-gray-50">
+                          <td className="px-4 py-4 font-medium text-gray-900">
+                            {item.data.namaKriteria}
+                          </td>
+                          <td className="px-4 py-4 text-gray-700">
+                            {item.data.bobot}%
+                          </td>
+
+                          {[1, 2, 3, 4, 5].map((rating) => (
+                            <td key={rating} className="px-3 py-4 text-center">
+                              <label className="flex justify-center">
+                                <input
+                                  type="radio"
+                                  name={`rating-${item.id}`}
+                                  value={rating}
+                                  checked={nilaiKaryawan[item.id] === rating}
+                                  onChange={() => handleRatingChange(item.id, rating)}
+                                  className="h-4 w-4 cursor-pointer"
+                                  disabled={isReadOnly}
+                                />
+                              </label>
+                            </td>
+                          ))}
+                        </tr>
+
+                        {/* ── BARU: Baris BARS (muncul hanya jika ada skor terpilih + deskripsi) */}
+                        {selected && barsTeks && (
+                          <tr>
+                            <td
+                              colSpan={7}
+                              className={`px-4 pb-3 pt-1 ${SKOR_WARNA_BARS[selected] ?? ''}`}
+                            >
+                              <div className={`flex items-start gap-3 rounded-lg border px-4 py-2.5 text-sm ${SKOR_WARNA_BARS[selected] ?? 'border-gray-200 bg-gray-50 text-gray-700'}`}>
+                                <span className="shrink-0 font-bold">{selected}</span>
+                                <div>
+                                  <span className="font-semibold">{SKOR_LABEL[selected]} — </span>
+                                  <span>{barsTeks}</span>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -617,6 +730,7 @@ export default function IsiPenilaianPage() {
         )}
       </CardSection>
 
+      {/* ── Catatan karyawan ──────────────────────────────────────────────── */}
       <CardSection>
         <div className="space-y-3">
           <label className="block text-sm font-medium text-gray-700">
@@ -633,6 +747,7 @@ export default function IsiPenilaianPage() {
         </div>
       </CardSection>
 
+      {/* ── Tombol aksi ───────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
         <button
           onClick={handleSimpanDraft}

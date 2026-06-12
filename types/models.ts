@@ -4,6 +4,26 @@ export type StatusPeriode = 'aktif' | 'ditutup';
 export type StatusPenilaian = 'draft' | 'dikirim' | 'dinilai';
 export type StatusKehadiran = 'hadir' | 'sakit' | 'izin';
 
+// ─── BARU ────────────────────────────────────────────────────────────────────
+/** Kategori tingkat bias dari gap analysis self-assessment */
+export type GapFlag = 'normal' | 'waspada' | 'bias-tinggi';
+
+/** Hasil analisis diskrepansi antara nilaiKaryawan dan nilaiAdmin */
+export interface GapAnalysis {
+  /** Selisih (nilaiKaryawan − nilaiAdmin) per kriteriaId */
+  perKriteria: Record<string, number>;
+  /** Rata-rata nilai absolut gap dari semua kriteria yang terisi */
+  rataRataGap: number;
+  /**
+   * Flag global berdasarkan rataRataGap:
+   * - ≤ 1   → 'normal'
+   * - 1–2   → 'waspada'
+   * - > 2   → 'bias-tinggi'
+   */
+  flagGlobal: GapFlag;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface Pengguna {
   uid: string;
   email: string;
@@ -14,7 +34,6 @@ export interface Pengguna {
   statusAktif?: boolean;
   fotoProfilUrl?: string;
 
-  // Firestore Timestamp
   createdAt: any;
   updatedAt?: any;
 }
@@ -27,7 +46,6 @@ export interface Karyawan {
   jabatan: string;
   statusAktif: boolean;
 
-  // Firestore Timestamp
   createdAt: any;
   updatedAt?: any;
 }
@@ -52,7 +70,6 @@ export interface PeriodePenilaian {
   tanggalSelesai?: any;
   akhir?: any;
 
-  // Firestore Timestamp
   createdAt: any;
   updatedAt?: any;
 }
@@ -64,7 +81,21 @@ export interface KriteriaPenilaian {
   bobot: number;
   urutan: number;
 
-  // optional untuk kompatibilitas data
+  // ─── BARU ──────────────────────────────────────────────────────────────────
+  /**
+   * Deskripsi perilaku untuk setiap skor (BARS — Behaviorally Anchored Rating Scales).
+   * Admin mengisi 5 deskripsi konkret saat membuat kriteria.
+   * Karyawan melihat deskripsi ini saat memilih skor self-assessment.
+   */
+  deskripsiSkor?: {
+    '1'?: string;
+    '2'?: string;
+    '3'?: string;
+    '4'?: string;
+    '5'?: string;
+  };
+  // ───────────────────────────────────────────────────────────────────────────
+
   createdAt?: any;
   updatedAt?: any;
 }
@@ -93,6 +124,15 @@ export interface PenilaianKinerja {
    * dibulatkan 2 desimal
    */
   totalNilai?: number;
+
+  // ─── BARU ──────────────────────────────────────────────────────────────────
+  /**
+   * Hasil analisis gap antara nilaiKaryawan dan nilaiAdmin.
+   * Dihitung otomatis saat admin submit evaluasi.
+   * Null jika belum dievaluasi atau karyawan tidak mengisi nilai.
+   */
+  gapAnalysis?: GapAnalysis;
+  // ───────────────────────────────────────────────────────────────────────────
 
   createdAt: any;
   updatedAt: any;

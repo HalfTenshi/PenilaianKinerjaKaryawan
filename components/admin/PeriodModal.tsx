@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { X, Trash2 } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { X, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -13,10 +13,25 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 
+// Tipe skor BARS sebagai string key agar kompatibel dengan Firestore map
+type SkorKey = '1' | '2' | '3' | '4' | '5';
+
+interface DeskripsiSkor {
+  '1': string;
+  '2': string;
+  '3': string;
+  '4': string;
+  '5': string;
+}
+
 interface Criterion {
-  id: string; // id lokal UI
+  id: string;
   name: string;
   weight: number;
+  /** Deskripsi perilaku BARS per skor (1–5) */
+  deskripsiSkor: DeskripsiSkor;
+  /** State UI: apakah panel BARS sedang dibuka */
+  showBars: boolean;
 }
 
 interface PeriodModalProps {
@@ -34,12 +49,30 @@ type PeriodeAktif = {
   updatedAt?: any;
 };
 
+// Deskripsi BARS kosong — diisi admin saat setup kriteria
+const BARS_KOSONG: DeskripsiSkor = {
+  '1': '',
+  '2': '',
+  '3': '',
+  '4': '',
+  '5': '',
+};
+
+// Label warna untuk setiap skor di panel BARS
+const SKOR_CONFIG: { key: SkorKey; label: string; warna: string }[] = [
+  { key: '5', label: 'Sangat Baik', warna: 'bg-green-100 border-green-300 text-green-800' },
+  { key: '4', label: 'Baik',        warna: 'bg-blue-100 border-blue-300 text-blue-800' },
+  { key: '3', label: 'Cukup',       warna: 'bg-yellow-100 border-yellow-300 text-yellow-800' },
+  { key: '2', label: 'Kurang',      warna: 'bg-orange-100 border-orange-300 text-orange-800' },
+  { key: '1', label: 'Sangat Kurang', warna: 'bg-red-100 border-red-300 text-red-800' },
+];
+
 const DEFAULT_CRITERIA: Criterion[] = [
-  { id: '1', name: 'Disiplin kerja', weight: 20 },
-  { id: '2', name: 'Kualitas pekerjaan', weight: 30 },
-  { id: '3', name: 'Keselamatan kerja (K3)', weight: 20 },
-  { id: '4', name: 'Kerja sama tim', weight: 15 },
-  { id: '5', name: 'Ketepatan waktu', weight: 15 },
+  { id: '1', name: 'Disiplin kerja',          weight: 20, deskripsiSkor: { ...BARS_KOSONG }, showBars: false },
+  { id: '2', name: 'Kualitas pekerjaan',       weight: 30, deskripsiSkor: { ...BARS_KOSONG }, showBars: false },
+  { id: '3', name: 'Keselamatan kerja (K3)',   weight: 20, deskripsiSkor: { ...BARS_KOSONG }, showBars: false },
+  { id: '4', name: 'Kerja sama tim',           weight: 15, deskripsiSkor: { ...BARS_KOSONG }, showBars: false },
+  { id: '5', name: 'Ketepatan waktu',          weight: 15, deskripsiSkor: { ...BARS_KOSONG }, showBars: false },
 ];
 
 function toDateInputValue(value: any): string {
@@ -89,19 +122,21 @@ function getSortableTime(value: any): number {
 }
 
 export function PeriodModal({ isOpen, onClose }: PeriodModalProps) {
-  const [formName, setFormName] = useState('');
+  const [formName, setFormName]   = useState('');
   const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [endDate, setEndDate]     = useState('');
 
-  const [criteria, setCriteria] = useState<Criterion[]>(DEFAULT_CRITERIA);
-  const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState('');
+  const [criteria, setCriteria]       = useState<Criterion[]>(DEFAULT_CRITERIA);
+  const [loading, setLoading]         = useState(false);
+  const [msg, setMsg]                 = useState('');
   const [periodeAktif, setPeriodeAktif] = useState<PeriodeAktif | null>(null);
 
   const totalWeight = useMemo(
     () => criteria.reduce((sum, c) => sum + (Number(c.weight) || 0), 0),
     [criteria]
   );
+
+  // ── Handler kriteria ────────────────────────────────────────────────────────
 
   const handleDeleteCriteria = (id: string) => {
     setCriteria((prev) => prev.filter((c) => c.id !== id));
@@ -133,9 +168,31 @@ export function PeriodModal({ isOpen, onClose }: PeriodModalProps) {
         Math.max(0, ...prev.map((c) => Number(c.id) || 0)) + 1
       ).toString();
 
-      return [...prev, { id: nextId, name: '', weight: 0 }];
+      return [...prev, { id: nextId, name: '', weight: 0, deskripsiSkor: { ...BARS_KOSONG }, showBars: false }];
     });
   };
+
+  // ── Handler BARS ────────────────────────────────────────────────────────────
+
+  /** Toggle panel deskripsi BARS untuk satu kriteria */
+  const handleToggleBars = (id: string) => {
+    setCriteria((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, showBars: !c.showBars } : c))
+    );
+  };
+
+  /** Update satu deskripsi skor (key: '1'–'5') pada satu kriteria */
+  const handleUpdateBars = (id: string, skor: SkorKey, value: string) => {
+    setCriteria((prev) =>
+      prev.map((c) =>
+        c.id === id
+          ? { ...c, deskripsiSkor: { ...c.deskripsiSkor, [skor]: value } }
+          : c
+      )
+    );
+  };
+
+  // ── Load periode aktif dari Firestore ───────────────────────────────────────
 
   useEffect(() => {
     if (!isOpen) return;
@@ -227,6 +284,16 @@ export function PeriodModal({ isOpen, onClose }: PeriodModalProps) {
             id: String(idx + 1),
             name: String(item.namaKriteria ?? '').trim(),
             weight: Number(item.bobot ?? 0),
+            // ── BARU: muat deskripsiSkor dari Firestore jika ada ───────────
+            deskripsiSkor: {
+              '1': String(item.deskripsiSkor?.['1'] ?? ''),
+              '2': String(item.deskripsiSkor?.['2'] ?? ''),
+              '3': String(item.deskripsiSkor?.['3'] ?? ''),
+              '4': String(item.deskripsiSkor?.['4'] ?? ''),
+              '5': String(item.deskripsiSkor?.['5'] ?? ''),
+            } satisfies DeskripsiSkor,
+            // ─────────────────────────────────────────────────────────────
+            showBars: false,
           }));
 
         setCriteria(list.length > 0 ? list : DEFAULT_CRITERIA);
@@ -240,6 +307,8 @@ export function PeriodModal({ isOpen, onClose }: PeriodModalProps) {
 
     loadAktif();
   }, [isOpen]);
+
+  // ── Publish ─────────────────────────────────────────────────────────────────
 
   const handlePublish = async () => {
     setMsg('');
@@ -268,6 +337,7 @@ export function PeriodModal({ isOpen, onClose }: PeriodModalProps) {
         id: c.id,
         name: String(c.name ?? '').trim(),
         weight: Number(c.weight ?? 0),
+        deskripsiSkor: c.deskripsiSkor,
       }))
       .filter((c) => c.name.length > 0);
 
@@ -318,7 +388,7 @@ export function PeriodModal({ isOpen, onClose }: PeriodModalProps) {
         });
       });
 
-      // Buat periode baru DI DALAM batch
+      // Buat periode baru
       const periodeRef = doc(collection(db, 'periode_penilaian'));
       batch.set(periodeRef, {
         namaPeriode,
@@ -329,15 +399,27 @@ export function PeriodModal({ isOpen, onClose }: PeriodModalProps) {
         updatedAt: serverTimestamp(),
       });
 
-      // Tulis kriteria baru untuk periode baru
-      // NOTE: kriteria periode lama TIDAK dihapus agar histori aman
+      // Tulis kriteria baru (histori lama tidak dihapus)
       cleaned.forEach((item, idx) => {
         const kriteriaRef = doc(collection(db, 'kriteria_penilaian'));
+
+        // ── BARU: saring deskripsiSkor, hanya simpan yang tidak kosong ────
+        const deskripsiSkorFinal: Record<string, string> = {};
+        (['1', '2', '3', '4', '5'] as SkorKey[]).forEach((s) => {
+          const val = String((item.deskripsiSkor as any)?.[s] ?? '').trim();
+          if (val) deskripsiSkorFinal[s] = val;
+        });
+        // ──────────────────────────────────────────────────────────────────
+
         batch.set(kriteriaRef, {
           periodeId: periodeRef.id,
           namaKriteria: item.name,
           bobot: item.weight,
           urutan: idx + 1,
+          // Hanya simpan field deskripsiSkor jika ada isian
+          ...(Object.keys(deskripsiSkorFinal).length > 0
+            ? { deskripsiSkor: deskripsiSkorFinal }
+            : {}),
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -362,7 +444,8 @@ export function PeriodModal({ isOpen, onClose }: PeriodModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="max-h-screen w-full max-w-2xl overflow-y-auto rounded-lg bg-white shadow-lg">
+      <div className="max-h-screen w-full max-w-3xl overflow-y-auto rounded-lg bg-white shadow-lg">
+        {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="sticky top-0 flex items-center justify-between border-b border-gray-200 bg-white p-6">
           <h2 className="text-2xl font-bold text-blue-900">
             Buat Periode & Kriteria Penilaian
@@ -377,6 +460,7 @@ export function PeriodModal({ isOpen, onClose }: PeriodModalProps) {
         </div>
 
         <div className="space-y-6 p-6">
+          {/* ── Info banner ─────────────────────────────────────────────── */}
           <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
             <p className="font-semibold">Perilaku publish yang aman:</p>
             <ul className="mt-2 list-disc pl-5 space-y-1">
@@ -391,6 +475,7 @@ export function PeriodModal({ isOpen, onClose }: PeriodModalProps) {
             )}
           </div>
 
+          {/* ── Form periode ────────────────────────────────────────────── */}
           <div>
             <h3 className="mb-4 text-lg font-semibold text-gray-900">
               Periode Penilaian
@@ -440,10 +525,16 @@ export function PeriodModal({ isOpen, onClose }: PeriodModalProps) {
             </div>
           </div>
 
+          {/* ── Kriteria + BARS ─────────────────────────────────────────── */}
           <div>
-            <h3 className="mb-4 text-lg font-semibold text-gray-900">
+            <h3 className="mb-1 text-lg font-semibold text-gray-900">
               Kriteria Penilaian & Bobot
             </h3>
+            <p className="mb-4 text-sm text-gray-500">
+              Klik <strong>Atur Deskripsi BARS</strong> pada tiap kriteria untuk
+              mengisi panduan perilaku per skor (1–5). Deskripsi ini akan
+              ditampilkan ke karyawan saat mengisi self-assessment.
+            </p>
 
             <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4">
               <p className="text-sm font-medium text-red-700">
@@ -454,79 +545,126 @@ export function PeriodModal({ isOpen, onClose }: PeriodModalProps) {
               </p>
             </div>
 
-            <div className="overflow-x-auto rounded-lg border border-gray-300">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-gray-300 bg-gray-100">
-                    <th className="px-6 py-3 text-left font-semibold text-gray-900">
-                      Kriteria
-                    </th>
-                    <th className="px-6 py-3 text-left font-semibold text-gray-900">
-                      Bobot (%)
-                    </th>
-                    <th className="px-6 py-3 text-left font-semibold text-gray-900">
-                      Aksi
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {criteria.map((criterion) => (
-                    <tr
-                      key={criterion.id}
-                      className="border-b border-gray-300 hover:bg-gray-50"
+            {/* Daftar kriteria sebagai cards agar BARS bisa expand dengan rapi */}
+            <div className="space-y-3">
+              {criteria.map((criterion) => (
+                <div
+                  key={criterion.id}
+                  className="rounded-lg border border-gray-300 overflow-hidden"
+                >
+                  {/* ── Baris utama ─────────────────────────────────────── */}
+                  <div className="flex items-center gap-3 bg-white px-4 py-3">
+                    {/* Nama kriteria */}
+                    <input
+                      type="text"
+                      value={criterion.name}
+                      onChange={(e) =>
+                        handleUpdateCriteria(criterion.id, 'name', e.target.value)
+                      }
+                      className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
+                      placeholder="Nama kriteria..."
+                      disabled={loading}
+                    />
+
+                    {/* Bobot */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <input
+                        type="number"
+                        value={criterion.weight}
+                        onChange={(e) =>
+                          handleUpdateCriteria(criterion.id, 'weight', e.target.value)
+                        }
+                        className="w-20 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900 text-center"
+                        min="0"
+                        max="100"
+                        placeholder="0"
+                        disabled={loading}
+                      />
+                      <span className="text-sm text-gray-500">%</span>
+                    </div>
+
+                    {/* Tombol toggle BARS */}
+                    <button
+                      type="button"
+                      onClick={() => handleToggleBars(criterion.id)}
+                      disabled={loading}
+                      className={`flex items-center gap-1 rounded-lg border px-3 py-2 text-xs font-medium transition shrink-0 ${
+                        criterion.showBars
+                          ? 'border-blue-300 bg-blue-600 text-white'
+                          : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                      }`}
                     >
-                      <td className="px-6 py-4">
-                        <input
-                          type="text"
-                          value={criterion.name}
-                          onChange={(e) =>
-                            handleUpdateCriteria(criterion.id, 'name', e.target.value)
-                          }
-                          className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-900"
-                          placeholder="Masukkan kriteria..."
-                          disabled={loading}
-                        />
-                      </td>
-                      <td className="px-6 py-4">
-                        <input
-                          type="number"
-                          value={criterion.weight}
-                          onChange={(e) =>
-                            handleUpdateCriteria(
-                              criterion.id,
-                              'weight',
-                              e.target.value
-                            )
-                          }
-                          className="w-24 rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-900"
-                          min="0"
-                          max="100"
-                          placeholder="0"
-                          disabled={loading}
-                        />
-                      </td>
-                      <td className="px-6 py-4">
-                        <button
-                          onClick={() => handleDeleteCriteria(criterion.id)}
-                          className="text-red-600 transition hover:text-red-800"
-                          title="Hapus"
-                          disabled={loading}
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      {criterion.showBars ? (
+                        <>
+                          <ChevronUp size={13} />
+                          Tutup BARS
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown size={13} />
+                          Atur Deskripsi BARS
+                        </>
+                      )}
+                    </button>
+
+                    {/* Hapus */}
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCriteria(criterion.id)}
+                      className="text-red-500 hover:text-red-700 transition shrink-0"
+                      title="Hapus kriteria"
+                      disabled={loading}
+                    >
+                      <Trash2 size={17} />
+                    </button>
+                  </div>
+
+                  {/* ── Panel BARS (expandable) ──────────────────────────── */}
+                  {criterion.showBars && (
+                    <div className="border-t border-blue-100 bg-blue-50 px-4 pb-4 pt-3">
+                      <p className="mb-3 text-xs font-semibold text-blue-800 uppercase tracking-wide">
+                        Deskripsi Perilaku per Skor — {criterion.name || 'Kriteria ini'}
+                      </p>
+                      <div className="space-y-2">
+                        {SKOR_CONFIG.map(({ key, label, warna }) => (
+                          <div key={key} className="flex items-start gap-2">
+                            {/* Badge skor */}
+                            <div
+                              className={`mt-1 shrink-0 w-20 rounded-md border px-2 py-1 text-center text-xs font-semibold ${warna}`}
+                            >
+                              {key} — {label}
+                            </div>
+                            {/* Textarea deskripsi */}
+                            <textarea
+                              value={criterion.deskripsiSkor[key]}
+                              onChange={(e) =>
+                                handleUpdateBars(criterion.id, key, e.target.value)
+                              }
+                              rows={2}
+                              placeholder={`Deskripsikan perilaku untuk skor ${key}...`}
+                              disabled={loading}
+                              className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-xs text-blue-600">
+                        Semakin detail deskripsinya, semakin kecil kemungkinan
+                        karyawan menilai diri secara subjektif.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
 
             <button
+              type="button"
               onClick={handleAddCriteria}
               className="mt-4 rounded-lg bg-blue-900 px-4 py-2 font-medium text-white transition hover:bg-blue-800"
               disabled={loading}
             >
-              Tambah Kriteria
+              + Tambah Kriteria
             </button>
           </div>
 
@@ -537,6 +675,7 @@ export function PeriodModal({ isOpen, onClose }: PeriodModalProps) {
           )}
         </div>
 
+        {/* ── Footer aksi ─────────────────────────────────────────────────── */}
         <div className="sticky bottom-0 flex gap-3 border-t border-gray-200 bg-gray-50 p-6">
           <button
             onClick={onClose}

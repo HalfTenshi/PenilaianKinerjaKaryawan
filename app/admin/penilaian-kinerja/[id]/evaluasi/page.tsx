@@ -18,6 +18,9 @@ import {
   type Karyawan,
   type PeriodePenilaian,
 } from '@/lib/firebase/adminPenilaianKinerja';
+import type { GapFlag } from '@/types/models';
+
+// ── Helper ──────────────────────────────────────────────────────────────────
 
 function toNumberSafe(v: any) {
   const n = Number(v);
@@ -44,26 +47,80 @@ function getTanggalSelesai(periode: Partial<PeriodePenilaian> | null | undefined
   );
 }
 
+// ── Konfigurasi visual gap ──────────────────────────────────────────────────
+
+type GapRowData = {
+  id: string;
+  name: string;
+  weight: string;
+  nilaiKaryawan: number | null;
+  nilaiAdmin: number;
+  gap: number | null;       // nilaiKaryawan - nilaiAdmin (null jika karyawan tidak isi)
+  flag: GapFlag | null;
+};
+
+function getGapFlag(absGap: number): GapFlag {
+  if (absGap <= 1) return 'normal';
+  if (absGap <= 2) return 'waspada';
+  return 'bias-tinggi';
+}
+
+const FLAG_CONFIG: Record<GapFlag, { label: string; ikon: string; bg: string; text: string; border: string }> = {
+  'normal': {
+    label: 'Normal',
+    ikon: '🟢',
+    bg: 'bg-green-50',
+    text: 'text-green-800',
+    border: 'border-green-200',
+  },
+  'waspada': {
+    label: 'Waspada',
+    ikon: '🟡',
+    bg: 'bg-yellow-50',
+    text: 'text-yellow-800',
+    border: 'border-yellow-200',
+  },
+  'bias-tinggi': {
+    label: 'Bias Tinggi',
+    ikon: '🔴',
+    bg: 'bg-red-50',
+    text: 'text-red-800',
+    border: 'border-red-200',
+  },
+};
+
+const GLOBAL_MSG: Record<GapFlag, string> = {
+  'normal':
+    'Tidak ada indikasi bias signifikan. Self-assessment karyawan cukup selaras dengan penilaian admin.',
+  'waspada':
+    'Terdapat potensi leniency bias. Pertimbangkan sesi feedback singkat dengan karyawan untuk menjelaskan perbedaan perspektif.',
+  'bias-tinggi':
+    'Bias self-assessment tinggi. Direkomendasikan sesi coaching / diskusi formal untuk menyamakan persepsi standar kinerja.',
+};
+
+// ── Page ────────────────────────────────────────────────────────────────────
+
 export default function EvaluasiPage() {
   const params = useParams();
   const router = useRouter();
   const penilaianId = String(params?.id ?? '');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading]           = useState(true);
+  const [error, setError]               = useState<string | null>(null);
 
   const [penilaian, setPenilaian] = useState<PenilaianKinerja | null>(null);
-  const [karyawan, setKaryawan] = useState<Karyawan | null>(null);
-  const [periode, setPeriode] = useState<PeriodePenilaian | null>(null);
-  const [kriteria, setKriteria] = useState<KriteriaPenilaian[]>([]);
+  const [karyawan, setKaryawan]   = useState<Karyawan | null>(null);
+  const [periode, setPeriode]     = useState<PeriodePenilaian | null>(null);
+  const [kriteria, setKriteria]   = useState<KriteriaPenilaian[]>([]);
 
   const [nilaiAdmin, setNilaiAdmin] = useState<Record<string, number>>({});
-  const [catatan, setCatatan] = useState('');
+  const [catatan, setCatatan]       = useState('');
 
-  const [hadirHari, setHadirHari] = useState(0);
+  const [hadirHari, setHadirHari]     = useState(0);
   const [hadirPersen, setHadirPersen] = useState(0);
+
+  // ── Load data ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
     let mounted = true;
@@ -76,7 +133,7 @@ export default function EvaluasiPage() {
         const p = await getPenilaianByDocId(penilaianId);
         if (!p) throw new Error('Data penilaian tidak ditemukan.');
 
-        const k = await getKaryawanById(p.karyawanId);
+        const k   = await getKaryawanById(p.karyawanId);
         const per = await getPeriodeById(p.periodeId);
         if (!per) throw new Error('Periode penilaian tidak ditemukan.');
 
@@ -124,20 +181,7 @@ export default function EvaluasiPage() {
     };
   }, [penilaianId]);
 
-  const criteriaRows = useMemo(() => {
-    return kriteria.map((kr) => {
-      const nilaiKaryawan = penilaian?.nilaiKaryawan?.[kr.id];
-      const nilaiAdminExisting = nilaiAdmin?.[kr.id];
-
-      return {
-        id: kr.id,
-        name: kr.namaKriteria,
-        weight: `${kr.bobot}%`,
-        nilaiKaryawan: typeof nilaiKaryawan === 'number' ? nilaiKaryawan : null,
-        nilaiAdmin: typeof nilaiAdminExisting === 'number' ? nilaiAdminExisting : 0,
-      };
-    });
-  }, [kriteria, nilaiAdmin, penilaian?.nilaiKaryawan]);
+  // ── Computed ───────────────────────────────────────────────────────────────
 
   const totalNilaiKaryawan = useMemo(() => {
     return hitungNilaiAkhir({ nilai: penilaian?.nilaiKaryawan, kriteria });
@@ -146,6 +190,49 @@ export default function EvaluasiPage() {
   const totalNilaiAdmin = useMemo(() => {
     return hitungNilaiAkhir({ nilai: nilaiAdmin, kriteria });
   }, [nilaiAdmin, kriteria]);
+
+  // ── BARU: Hitung gap per kriteria secara real-time ─────────────────────────
+  const gapRows = useMemo<GapRowData[]>(() => {
+    return kriteria.map((kr) => {
+      const nilaiK = penilaian?.nilaiKaryawan?.[kr.id];
+      const nilaiA = nilaiAdmin?.[kr.id] ?? 0;
+
+      const hasKaryawan = typeof nilaiK === 'number';
+
+      let gap: number | null = null;
+      let flag: GapFlag | null = null;
+
+      if (hasKaryawan) {
+        gap  = Math.round((nilaiK! - nilaiA) * 100) / 100;
+        flag = getGapFlag(Math.abs(gap));
+      }
+
+      return {
+        id: kr.id,
+        name: kr.namaKriteria,
+        weight: `${kr.bobot}%`,
+        nilaiKaryawan: hasKaryawan ? nilaiK! : null,
+        nilaiAdmin: nilaiA,
+        gap,
+        flag,
+      };
+    });
+  }, [kriteria, nilaiAdmin, penilaian?.nilaiKaryawan]);
+
+  // Ringkasan gap global
+  const summaryGap = useMemo(() => {
+    const valids = gapRows.filter((r) => r.gap !== null);
+    if (valids.length === 0) return null;
+
+    const totalAbsGap = valids.reduce((sum, r) => sum + Math.abs(r.gap!), 0);
+    const rataRataGap = Math.round((totalAbsGap / valids.length) * 100) / 100;
+    const flag = getGapFlag(rataRataGap);
+
+    return { rataRataGap, flag };
+  }, [gapRows]);
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // ── Handler ────────────────────────────────────────────────────────────────
 
   const handleUpdateNilaiAdmin = (kriteriaId: string, value: string) => {
     const n = toNumberSafe(value);
@@ -172,6 +259,8 @@ export default function EvaluasiPage() {
       setIsSubmitting(false);
     }
   };
+
+  // ── Render state ───────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -208,6 +297,7 @@ export default function EvaluasiPage() {
 
   return (
     <div className="space-y-6 ml-80 mt-28">
+      {/* ── Breadcrumb ──────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 text-sm text-blue-700 font-medium">
         <Link href="/admin/penilaian-kinerja" className="hover:text-blue-900">
           Penilaian Kinerja
@@ -220,6 +310,7 @@ export default function EvaluasiPage() {
         <h1 className="text-4xl font-bold text-blue-900">Evaluasi Penilaian Kerja</h1>
       </div>
 
+      {/* ── Header karyawan ─────────────────────────────────────────────── */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
         <div className="flex gap-8">
           <div className="flex-shrink-0">
@@ -281,6 +372,7 @@ export default function EvaluasiPage() {
         </div>
       </div>
 
+      {/* ── Ringkasan nilai & catatan karyawan ──────────────────────────── */}
       <div className="grid grid-cols-2 gap-6">
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
@@ -308,39 +400,42 @@ export default function EvaluasiPage() {
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 min-h-[120px]">
             <p className="text-sm text-gray-700 whitespace-pre-wrap">{catatanKaryawanText}</p>
           </div>
-
-          <p className="text-xs text-gray-500 mt-2">
-            Field yang dibaca: <b>catatanKaryawan</b> pada dokumen <b>penilaian_kinerja</b>.
-          </p>
         </div>
       </div>
 
+      {/* ── Tabel penilaian + kolom gap (BARU) ──────────────────────────── */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
-        <div className="border-b border-gray-300 pb-4 mb-6">
+        <div className="border-b border-gray-300 pb-4 mb-6 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-blue-900">Hasil Penilaian Kriteria</h3>
+          <span className="text-xs text-gray-500">
+            Kolom <strong>Gap</strong> = Nilai Karyawan − Nilai Admin
+          </span>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="bg-blue-100">
-                <th className="px-6 py-3 text-left font-semibold text-blue-900">Kriteria Penilaian</th>
-                <th className="px-6 py-3 text-left font-semibold text-blue-900">Bobot</th>
-                <th className="px-6 py-3 text-center font-semibold text-blue-900">Nilai Karyawan</th>
-                <th className="px-6 py-3 text-center font-semibold text-blue-900">Nilai Admin</th>
+                <th className="px-4 py-3 text-left font-semibold text-blue-900">Kriteria</th>
+                <th className="px-4 py-3 text-left font-semibold text-blue-900">Bobot</th>
+                <th className="px-4 py-3 text-center font-semibold text-blue-900">Nilai Karyawan</th>
+                <th className="px-4 py-3 text-center font-semibold text-blue-900">Nilai Admin</th>
+                {/* ── BARU ── */}
+                <th className="px-4 py-3 text-center font-semibold text-blue-900">Gap</th>
+                <th className="px-4 py-3 text-center font-semibold text-blue-900">Indikasi Bias</th>
               </tr>
             </thead>
             <tbody>
-              {criteriaRows.map((item) => (
+              {gapRows.map((item) => (
                 <tr key={item.id} className="border-b border-gray-200 hover:bg-gray-50">
-                  <td className="px-6 py-4 text-blue-700 font-medium">{item.name}</td>
-                  <td className="px-6 py-4 text-gray-700">{item.weight}</td>
+                  <td className="px-4 py-4 text-blue-700 font-medium">{item.name}</td>
+                  <td className="px-4 py-4 text-gray-700">{item.weight}</td>
 
-                  <td className="px-6 py-4 text-center text-gray-700">
+                  <td className="px-4 py-4 text-center text-gray-700">
                     {item.nilaiKaryawan === null ? '-' : item.nilaiKaryawan}
                   </td>
 
-                  <td className="px-6 py-4 text-center">
+                  <td className="px-4 py-4 text-center">
                     <input
                       type="number"
                       value={String(item.nilaiAdmin)}
@@ -351,12 +446,44 @@ export default function EvaluasiPage() {
                       step="0.5"
                     />
                   </td>
+
+                  {/* ── BARU: Kolom Gap ──────────────────────────────────── */}
+                  <td className="px-4 py-4 text-center">
+                    {item.gap === null ? (
+                      <span className="text-gray-400 text-sm">—</span>
+                    ) : (
+                      <span
+                        className={`font-semibold text-sm ${
+                          item.flag === 'normal'
+                            ? 'text-green-700'
+                            : item.flag === 'waspada'
+                            ? 'text-yellow-700'
+                            : 'text-red-700'
+                        }`}
+                      >
+                        {item.gap > 0 ? '+' : ''}{item.gap}
+                      </span>
+                    )}
+                  </td>
+
+                  {/* ── BARU: Kolom Indikasi Bias ─────────────────────────── */}
+                  <td className="px-4 py-4 text-center">
+                    {item.flag === null ? (
+                      <span className="text-gray-400 text-sm">—</span>
+                    ) : (
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium border ${FLAG_CONFIG[item.flag].bg} ${FLAG_CONFIG[item.flag].text} ${FLAG_CONFIG[item.flag].border}`}
+                      >
+                        {FLAG_CONFIG[item.flag].ikon} {FLAG_CONFIG[item.flag].label}
+                      </span>
+                    )}
+                  </td>
                 </tr>
               ))}
 
-              {criteriaRows.length === 0 && (
+              {gapRows.length === 0 && (
                 <tr>
-                  <td className="px-6 py-6 text-gray-500" colSpan={4}>
+                  <td className="px-4 py-6 text-gray-500" colSpan={6}>
                     Kriteria untuk periode ini belum dibuat.
                   </td>
                 </tr>
@@ -365,6 +492,37 @@ export default function EvaluasiPage() {
           </table>
         </div>
 
+        {/* ── BARU: Panel ringkasan diskrepansi ──────────────────────────── */}
+        {summaryGap && (
+          <div
+            className={`mt-5 rounded-lg border p-4 ${FLAG_CONFIG[summaryGap.flag].bg} ${FLAG_CONFIG[summaryGap.flag].border}`}
+          >
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">{FLAG_CONFIG[summaryGap.flag].ikon}</span>
+              <div>
+                <p className={`font-semibold ${FLAG_CONFIG[summaryGap.flag].text}`}>
+                  Analisis Diskrepansi Self-Assessment —{' '}
+                  {FLAG_CONFIG[summaryGap.flag].label}
+                </p>
+                <p className={`mt-1 text-sm ${FLAG_CONFIG[summaryGap.flag].text}`}>
+                  Rata-rata gap absolut:{' '}
+                  <strong>{summaryGap.rataRataGap} poin</strong>
+                  {' '}(skala 0–5)
+                </p>
+                <p className={`mt-1 text-sm ${FLAG_CONFIG[summaryGap.flag].text}`}>
+                  {GLOBAL_MSG[summaryGap.flag]}
+                </p>
+                <p className="mt-2 text-xs text-gray-500">
+                  Hasil analisis ini akan disimpan ke Firestore sebagai{' '}
+                  <code>gapAnalysis</code> saat tombol Submit ditekan.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* ───────────────────────────────────────────────────────────────── */}
+
+        {/* Catatan admin */}
         <div className="mt-6 pt-6 border-t border-gray-200 space-y-3">
           <h4 className="font-semibold text-blue-900">Catatan Admin</h4>
           <textarea
@@ -375,6 +533,7 @@ export default function EvaluasiPage() {
           />
         </div>
 
+        {/* Total nilai akhir */}
         <div className="mt-6 pt-6 bg-blue-50 rounded-lg p-6 flex justify-center">
           <div className="text-center">
             <p className="text-blue-700 font-medium mb-2">Total Nilai Akhir :</p>
@@ -383,6 +542,7 @@ export default function EvaluasiPage() {
         </div>
       </div>
 
+      {/* ── Tombol aksi ─────────────────────────────────────────────────── */}
       <div className="flex justify-end gap-3">
         <Link
           href="/admin/penilaian-kinerja"
