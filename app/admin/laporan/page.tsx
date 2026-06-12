@@ -29,6 +29,7 @@ type ReportRow = {
   nilaiAkhir: number | null;          // null = belum dievaluasi admin
   statusPenilaian: 'dikirim' | 'dinilai';
   periodeId: string;
+  namaPeriode: string;                // ← BARU: nama periode untuk kolom Semua Periode
   karyawanId: string;
 };
 
@@ -75,22 +76,22 @@ function getNilaiColor(nilai: number | null) {
 
 export default function LaporanPage() {
   const [currentPage, setCurrentPage] = useState(1);
-  const [searchDraft, setSearchDraft] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchDraft, setSearchDraft]   = useState('');
+  const [searchTerm, setSearchTerm]     = useState('');
   const [sortOrder, setSortOrder] = useState<SortOrder>('default');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState<string | null>(null);
 
-  const [periodeOptions, setPeriodeOptions] = useState<PeriodePenilaian[]>([]);
+  const [periodeOptions, setPeriodeOptions]   = useState<PeriodePenilaian[]>([]);
   const [selectedPeriode, setSelectedPeriode] = useState<string>('');
-  const [selectedDivisi, setSelectedDivisi] = useState<string>('');
+  const [selectedDivisi, setSelectedDivisi]   = useState<string>('');
 
-  const [rows, setRows] = useState<ReportRow[]>([]);
+  const [rows, setRows]                   = useState<ReportRow[]>([]);
   const [divisiOptions, setDivisiOptions] = useState<string[]>([]);
 
   const [totalAktifCount, setTotalAktifCount] = useState(0);
-  const [sudahIsiCount, setSudahIsiCount] = useState(0);
-  const [belumIsiCount, setBelumIsiCount] = useState(0);
+  const [sudahIsiCount, setSudahIsiCount]     = useState(0);
+  const [belumIsiCount, setBelumIsiCount]     = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -160,9 +161,9 @@ export default function LaporanPage() {
           setBelumIsiCount(belumIsi);
         }
 
-        const karyawanCache = new Map<string, Karyawan | null>();
-        const kriteriaCache = new Map<string, Awaited<ReturnType<typeof getKriteriaByPeriode>>>();
-        const periodeCache = new Map<string, PeriodePenilaian | null>();
+        const karyawanCache  = new Map<string, Karyawan | null>();
+        const kriteriaCache  = new Map<string, Awaited<ReturnType<typeof getKriteriaByPeriode>>>();
+        const periodeCache   = new Map<string, PeriodePenilaian | null>();
 
         const result = await Promise.all(
           penilaianRaw.map(async (p: any) => {
@@ -198,7 +199,7 @@ export default function LaporanPage() {
             }
             // ─────────────────────────────────────────────────────────────
 
-            let hadirPersen = 0;
+            let hadirPersen    = 0;
             let sakitIzinPersen = 0;
             if (per) {
               try {
@@ -207,7 +208,7 @@ export default function LaporanPage() {
                   mulai: getTanggalMulai(per),
                   selesai: getTanggalSelesai(per),
                 });
-                hadirPersen = sum.hadirPersen;
+                hadirPersen     = sum.hadirPersen;
                 sakitIzinPersen = sum.sakitIzinPersen;
               } catch (e: any) {
                 console.warn('Attendance query warning:', e?.message);
@@ -223,6 +224,7 @@ export default function LaporanPage() {
               nilaiAkhir,
               statusPenilaian: p.status as 'dikirim' | 'dinilai',
               periodeId: p.periodeId,
+              namaPeriode: per?.namaPeriode ?? '-',   // ← BARU
               karyawanId: p.karyawanId,
             } as ReportRow;
           })
@@ -298,8 +300,8 @@ export default function LaporanPage() {
   };
 
   const itemsPerPage = 5;
-  const totalPages = Math.ceil(sortedData.length / itemsPerPage) || 1;
-  const startIndex = (currentPage - 1) * itemsPerPage;
+  const totalPages  = Math.ceil(sortedData.length / itemsPerPage) || 1;
+  const startIndex  = (currentPage - 1) * itemsPerPage;
   const currentData = sortedData.slice(startIndex, startIndex + itemsPerPage);
 
   const labelPeriodeCard = useMemo(() => {
@@ -468,6 +470,10 @@ export default function LaporanPage() {
                 <tr className="border-b border-gray-300 bg-gray-50">
                   <th className="px-6 py-3 text-left font-semibold text-gray-900">No</th>
                   <th className="px-6 py-3 text-left font-semibold text-gray-900">Nama</th>
+                  {/* ── Kolom Periode: hanya tampil saat Semua Periode ── */}
+                  {!selectedPeriode && (
+                    <th className="px-6 py-3 text-left font-semibold text-gray-900">Periode</th>
+                  )}
                   <th className="px-6 py-3 text-left font-semibold text-gray-900">Divisi</th>
                   <th className="px-6 py-3 text-left font-semibold text-gray-900">Hadir (%)</th>
                   <th className="px-6 py-3 text-left font-semibold text-gray-900">Sakit/izin (%)</th>
@@ -479,8 +485,8 @@ export default function LaporanPage() {
                     >
                       <span>Nilai Akhir</span>
                       {sortOrder === 'default' && <ArrowUpDown size={14} className="text-gray-400 group-hover:text-blue-600" />}
-                      {sortOrder === 'desc' && <ArrowDown size={14} className="text-blue-700" />}
-                      {sortOrder === 'asc' && <ArrowUp size={14} className="text-blue-700" />}
+                      {sortOrder === 'desc'    && <ArrowDown   size={14} className="text-blue-700" />}
+                      {sortOrder === 'asc'     && <ArrowUp     size={14} className="text-blue-700" />}
                     </button>
                   </th>
                   {/* ── FIX: kolom Status ─────────────────────────────── */}
@@ -494,6 +500,12 @@ export default function LaporanPage() {
                   <tr key={item.penilaianId} className="border-b border-gray-200 hover:bg-gray-50">
                     <td className="px-6 py-4 text-gray-900">{startIndex + idx + 1}</td>
                     <td className="px-6 py-4 font-medium text-gray-900">{item.nama}</td>
+                    {/* ── Sel Periode: hanya tampil saat Semua Periode ── */}
+                    {!selectedPeriode && (
+                      <td className="px-6 py-4 text-gray-600 text-sm whitespace-nowrap">
+                        {item.namaPeriode}
+                      </td>
+                    )}
                     <td className="px-6 py-4 text-gray-900">{item.divisi}</td>
                     <td className="px-6 py-4 text-gray-900">{item.hadir}%</td>
                     <td className="px-6 py-4 text-gray-900">{item.sakit}%</td>
@@ -538,7 +550,7 @@ export default function LaporanPage() {
 
                 {currentData.length === 0 && (
                   <tr>
-                    <td className="px-6 py-6 text-gray-500" colSpan={8}>
+                    <td className="px-6 py-6 text-gray-500" colSpan={selectedPeriode ? 8 : 9}>
                       Tidak ada data laporan.
                     </td>
                   </tr>
@@ -564,10 +576,11 @@ export default function LaporanPage() {
             <button
               key={page}
               onClick={() => setCurrentPage(page)}
-              className={`rounded-lg px-3 py-2 transition ${currentPage === page
+              className={`rounded-lg px-3 py-2 transition ${
+                currentPage === page
                   ? 'bg-blue-900 text-white'
                   : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
-                }`}
+              }`}
             >
               {page}
             </button>
